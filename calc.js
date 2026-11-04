@@ -28,6 +28,8 @@ function val(rec,c){if(!rec)return 0;const o=rec.ov&&rec.ov[c];if(o!=null&&o!=='
 function isOv(rec,c){const o=rec&&rec.ov&&rec.ov[c];return o!=null&&o!==''&&isFinite(o)}
 function raw(rec,c){if(!rec)return 0;const k=rec.id+':'+c;if(cache.has(k))return cache.get(k);cache.set(k,0);let v;
  const f=rec.f&&rec.f[c];if(f){if(f==='#REF!')v=rec.v&&typeof rec.v[c]==='number'?rec.v[c]:NaN;else{try{v=ev(rec,parse(f))}catch(e){v=NaN}}}else v=numv(rec.v&&rec.v[c]);
+ // eigene Posten (rec.extra) werden von der Zielspalte rec.xcol abgezogen (Netto bzw. Übrig)
+ if(rec.extra&&rec.extra.length&&c===rec.xcol)for(const x of rec.extra)v-=numv(x.amount);
  cache.set(k,v);return v}
 // Lineare Zerlegung (nur + und -): {key:coef}, sonst null
 function linear(rec,a,coef,out){if(a.n!=null){out.push(['#',a.n*coef]);return true}
@@ -42,15 +44,18 @@ function waterfall(rec,netCol,deep=true){let terms=[[rec.id+':'+netCol,1]];
   terms.splice(bi,1,...out);
   const m=new Map();for(const[kk,cc]of terms)m.set(kk==='#'?'#'+m.size:kk,(m.get(kk)||0)+cc);terms=[...m.entries()].filter(([kk,cc])=>Math.abs(cc)>1e-12).map(([kk,cc])=>[kk.startsWith('#')?'#':kk,cc]);
   const fx=terms.filter(t=>t[0]==='#').reduce((s,t)=>s+t[1],0);terms=terms.filter(t=>t[0]!=='#');if(Math.abs(fx)>1e-12)terms.push(['#',fx])}
- return terms.map(([k,c])=>{if(k[0]==='@'){const kk=k.slice(1),i=kk.lastIndexOf(':'),id=kk.slice(0,i),col=kk.slice(i+1),r=DB.recs[id],tb=DB.tables[r.t];const lab=(tb.cols.find(x=>x[0]===col)||[,col])[1]||col;
-   return{key:k,col,label:'Korrektur '+lab.trim()+' (manuell)',coef:c,amount:c*(val(r,col)-raw(r,col)),manual:true,adjOf:col,ovValue:val(r,col),calcValue:raw(r,col)}}
-  if(k==='#')return{key:'#',col:'',label:'Korrektur (fester Betrag)',coef:1,amount:c};
+ const ownLab=(r,col,lab)=>(r.lbl&&r.lbl[col])||lab;
+ const out2=terms.map(([k,c])=>{if(k[0]==='@'){const kk=k.slice(1),i=kk.lastIndexOf(':'),id=kk.slice(0,i),col=kk.slice(i+1),r=DB.recs[id],tb=DB.tables[r.t];const lab=(tb.cols.find(x=>x[0]===col)||[,col])[1]||col;
+   return{key:k,col,label:'Korrektur '+lab.trim()+' (manuell)',tlabel:'Korrektur',coef:c,amount:c*(val(r,col)-raw(r,col)),manual:true,adjOf:col,ovValue:val(r,col),calcValue:raw(r,col)}}
+  if(k==='#')return{key:'#',col:'',label:'Korrektur (fester Betrag)',tlabel:'#',coef:1,amount:c};
   const i=k.lastIndexOf(':'),id=k.slice(0,i),col=k.slice(i+1),r=DB.recs[id],tb=DB.tables[r.t];const lab=(tb.cols.find(x=>x[0]===col)||[,col])[1]||col;
-  return{key:k,col,label:lab+(id!==rec.id?' ('+(r.label||id)+')':''),coef:c,amount:c*val(r,col)}})}
-const isTax=l=>/^ESt|Steuerdiff/i.test(l.trim()),isMwst=l=>/^MwSt/i.test(l.trim());
+  return{key:k,col,label:ownLab(r,col,lab)+(id!==rec.id?' ('+(r.label||id)+')':''),tlabel:lab,coef:c,amount:c*val(r,col)}});
+ if(rec.extra&&rec.extra.length&&rec.xcol===netCol)for(const x of rec.extra)out2.push({key:'x:'+x.id,col:'',xid:x.id,label:x.name||'Eigener Posten',tlabel:'',coef:-1,amount:-numv(x.amount),extra:true});
+ return out2}
+const isTax=l=>/^ESt|Steuerdiff/i.test(String(l||'').trim()),isMwst=l=>/^MwSt/i.test(String(l||'').trim());
 function incomeSummary(rec){const tb=DB.tables[rec.t],nc=rec.net||tb.net;const net=val(rec,nc);const w=waterfall(rec,nc);
  let gross=val(rec,'B'),mwst=0,tax=0,ded=0,adj=0;const base=w[0];const manual=w.some(x=>x.manual);
- for(const x of w.slice(1)){if(x.manual)adj+=x.amount;else if(isMwst(x.label))mwst-=x.amount;else if(isTax(x.label))tax-=x.amount;else ded-=x.amount}
+ for(const x of w.slice(1)){if(x.manual)adj+=x.amount;else if(isMwst(x.tlabel))mwst-=x.amount;else if(isTax(x.tlabel))tax-=x.amount;else ded-=x.amount}
  if(!gross&&base)gross=base.amount; // Zeile ohne Überweisung: Basis ist der erste Betrag im Rechenweg
  else if(base&&base.col!=='B')ded+=gross-base.amount; // Basis ≠ Überweisung: Differenz zählt als Abzug
  return{gross,mwst,tax,ded,adj,net,manual,steps:w}}
