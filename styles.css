@@ -64,3 +64,14 @@ details.group summary{list-style:none;padding:13px 16px;color:var(--accent);curs
 [hidden]{display:none!important}
 .cell .l .one{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cell .l small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .group.ic .cell .l{min-width:0}
+/* v2: Archiv + manuelles Netto */
+.badge.man{background:var(--tint);color:var(--accent)}
+.netbtn{background:none;padding:0;border-radius:8px;display:inline-flex;align-items:center;gap:8px;color:var(--text);max-width:100%}.netbtn .big{margin:4px 0 2px}.netbtn .pen{color:var(--accent);flex:0 0 18px}
+.dhead .netbtn{justify-content:center}.ovline{color:var(--sec);font-size:14px;margin-top:2px}.dhead .link,.hero .link{font-size:15px;padding:4px 0}
+.netedit{margin:6px 0 2px}.netedit input{width:100%;font:700 30px/1.2 -apple-system,"SF Pro Display",system-ui,sans-serif;text-align:center;border:0;border-radius:12px;background:var(--fill);color:var(--text);padding:10px;outline:2px solid var(--accent);font-variant-numeric:tabular-nums}.netedit .rowbtns{margin:10px 0 0}
+.hero .netedit input{text-align:left}
+.wf .manual .l{color:var(--accent)}
+.av.arc{background:linear-gradient(180deg,#8e8e93,#636366)}.av.arc2{background:var(--fill);color:var(--text);font-size:14px}
+.mfoot{display:flex;justify-content:flex-end;margin:2px 4px 0}.mfoot .link{font-size:14px}
+.yh{display:flex;justify-content:space-between;align-items:center;width:100%;background:none;border-radius:0;padding:18px 4px 8px;font-size:22px;font-weight:700;text-align:left}.yh span:last-child{font-size:13px;font-weight:500;color:var(--sec);display:flex;align-items:center;gap:8px}
+.tw{font-style:normal;font-size:20px;color:var(--accent);transition:transform .2s;display:inline-block}.tw.o{transform:rotate(90deg)}

@@ -1,5 +1,5 @@
 'use strict';
-const VERSION='ek-v1',KEY='einkommen-v1';
+const VERSION='ek-v2',KEY='einkommen-v1';
 const $=s=>document.querySelector(s),view=$('#view');
 const EUR=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
 const fm=x=>isFinite(x)?EUR.format(Math.abs(x)<.005?0:x):'—';
@@ -13,8 +13,8 @@ const num=s=>{s=String(s??'').trim().replace(/[€\s]/g,'');if(!s)return NaN;if(
 const inpE=x=>isFinite(x)&&x!==''?(+x).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
 const inp=x=>isFinite(x)&&x!==''?(+(+x).toFixed(2)).toLocaleString('de-DE',{maximumFractionDigits:2,useGrouping:false}):'';
 const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
-function defaults(){return{v:1,tables:{},recs:{},settings:{mwst:19,rates:{},defaults:{},theme:'auto'},pin:null,setups:[]}}
-function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.recs){s.settings=Object.assign(defaults().settings,s.settings);s.setups=s.setups||[];return s}}catch(e){}return defaults()}
+function defaults(){return{v:2,archive:{},tables:{},recs:{},settings:{mwst:19,rates:{},defaults:{},theme:'auto'},pin:null,setups:[]}}
+function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.recs){s.settings=Object.assign(defaults().settings,s.settings);s.setups=s.setups||[];s.archive=s.archive||{};if(!s.v||s.v<2){s.v=2;try{localStorage.setItem(KEY,JSON.stringify(s))}catch(e){}}return s}}catch(e){}return defaults()}
 let S=load();Calc.setDB(S);
 let SUM=new Map();buildSrc();
 function save(){localStorage.setItem(KEY,JSON.stringify(S));Calc.setDB(S);SUM=new Map();buildSrc()}
@@ -40,6 +40,13 @@ const years=()=>{const s=new Set(all().filter(r=>isInc(r)||isBud(r)).map(yr).fil
 const unknownDay=r=>(r.notes||[]).some(n=>/Tag unbekannt/.test(n))||String(r.date).length<10;
 const title=r=>{const s=SR(srcOf(r)).name;return r.sub?r.sub+' · '+s:s};
 const dtext=r=>{const d=String(r.date);if(unknownDay(r))return MON[mo(r)]+' '+yr(r)+' · Tag offen';return d.slice(8,10)+'.'+d.slice(5,7)+'.'+d.slice(0,4)};
+const ymOf=r=>String(r.date||'').slice(0,7);
+const curYM=()=>today().slice(0,7);
+// Archiv: alle Monate vor dem aktuellen Monat (rollt automatisch); manuell: archive[ym]=true (archivieren) / false (zurückgeholt)
+const isArch=k=>{const m=S.archive||{};if(m[k]===true)return true;if(m[k]===false)return false;return k<curYM()};
+function toggleArch(k){S.archive=S.archive||{};const a=isArch(k);if(a){if(k<curYM())S.archive[k]=false;else delete S.archive[k]}else{if(k<curYM())delete S.archive[k];else S.archive[k]=true}save()}
+const ymText=k=>MON[+k.slice(5,7)-1]+' '+k.slice(0,4);
+const manBadge='<span class="badge man">manuell</span>';
 const colLabel=(tb,c)=>((tb.cols||[]).find(x=>x[0]===c)||[,c])[1]||c;
 function agg(rs){const z=()=>({g:0,m:0,t:0,d:0,n:0,c:0});const o={ist:z(),plan:z(),src:{},months:[...Array(12)].map(()=>({}))};
  for(const r of rs){const s=sm(r),k=r.plan?'plan':'ist',src=srcOf(r);
@@ -53,7 +60,7 @@ function deriveRates(){const R=S.settings.rates;for(const r of incs()){if(r.plan
 function rateFor(src,y){const R=S.settings.rates;if(R[src+':'+y]!=null)return R[src+':'+y];const ks=Object.keys(R).filter(k=>k.startsWith(src+':')).sort();return ks.length?R[ks[ks.length-1]]:30}
 
 /* ---------- Rendering ---------- */
-function setTab(t){U.tab=t;U.detail=null;if(t!=='new'||(U.form&&U.form.mode==='edit'))U.form=null;U.bedit=false;U.defs=null;render();scrollTo(0,0)}
+function setTab(t){U.tab=t;U.detail=null;U.archive=false;U.amonth=null;U.barch=false;U.netEdit=null;if(t!=='new'||(U.form&&U.form.mode==='edit'))U.form=null;U.bedit=false;U.defs=null;render();scrollTo(0,0)}
 function yearSegs(){const ys=years();if(!ys.length)return'';return`<div class="segs">${ys.map(y=>`<button class="seg ${y===U.year?'on':''}" data-act="year" data-v="${y}">${y}</button>`).join('')}</div>`}
 function render(){document.querySelectorAll('.tabbar button').forEach(b=>b.classList.toggle('on',b.dataset.tab===U.tab));
  if(U.year==null){const ys=years(),cy=new Date().getFullYear();U.year=ys.includes(cy)?cy:ys[ys.length-1]||cy}
@@ -87,27 +94,55 @@ function home(){if(!years().length)return`<h1>Übersicht</h1>${resultPanel()}${e
  <div class="group ic" style="box-shadow:none;margin:0">${SV.map(([k,v])=>`<button class="cell" data-act="filter" data-v="${k}"><span class="av ${SR(k).cls}">${SR(k).l}</span><div class="l">${SR(k).name}<small>${v.c} Einträge · brutto ${fm(v.g)} · Steuer ${fm(v.t)}</small></div><div class="r"><b>${fm(v.n)}</b><br>${pct(v.n/tn*100)}</div></button>`).join('')}</div></div>
  <div class="gh">Vergleich mit ${y-1}</div>${hasPrev?`<div class="group">${cmp('Netto',a.ist.n,p.ist.n)}${cmp('Brutto',a.ist.g,p.ist.g)}${cmp('Einkommensteuer',a.ist.t,p.ist.t)}</div><div class="foot">${cur&&lastM<11?`Gleicher Zeitraum: Januar–${MON[lastM]}. `:''}${firstM>0?`${y-1} enthält Daten erst ab ${MON[firstM]}.`:''}</div>`:`<div class="group"><div class="cell"><div class="l" style="color:var(--sec)">Für ${y-1} gibt es keine Daten.</div></div></div>`}`}
 
+const filt=r=>U.filter==='all'||srcOf(r)===U.filter;
+function incRow(r){const s=sm(r);return`<button class="cell ${r.plan?'plan':''}" data-act="open" data-id="${r.id}"><span class="av ${SR(srcOf(r)).cls}">${SR(srcOf(r)).l}</span><div class="l"><div class="one">${esc(r.sub&&r.sub.length>5?r.sub:title(r))}</div><small>${r.plan?'<span class="badge" style="margin:0 5px 0 0">Plan</span>':''}${s.manual?'<span class="badge man" style="margin:0 5px 0 0">manuell</span>':''}${unknownDay(r)?'Tag offen':String(r.date).slice(8,10)+'.'+String(r.date).slice(5,7)+'.'} · brutto ${fm(s.gross)}</small></div><div class="r"><b>${fm(s.net)}</b></div><span class="chev">›</span></button>`}
+const sumN=(rs,pl)=>rs.filter(r=>!!r.plan===pl).reduce((x,r)=>x+(isFinite(sm(r).net)?sm(r).net:0),0);
+const sumG=rs=>rs.filter(r=>!r.plan).reduce((x,r)=>x+(isFinite(sm(r).gross)?sm(r).gross:0),0);
+function monthSection(k,list,withBtn){const n=sumN(list,false),pn=sumN(list,true);
+ return`<section class="month"><div class="mh"><span>${ymText(k)}</span><span>netto <b>${fm(n)}</b>${pn?' · Plan '+fm(pn):''}</span></div><div class="group ic">${list.slice().reverse().map(incRow).join('')}</div>${withBtn?`<div class="mfoot"><button class="link" data-act="archtog" data-v="${k}">${isArch(k)?'Monat zurückholen':'Monat archivieren'}</button></div>`:''}</section>`}
+function chipsHtml(){return`<div class="chips">${[['all','Alle'],...SRCS.map(k=>[k,SR(k).name])].map(([k,l])=>`<button class="chip ${U.filter===k?'on':''}" data-act="filter" data-v="${k}">${l}</button>`).join('')}</div>`}
+function archRow(kind,months,total){return`<div class="group ic"><button class="cell" data-act="${kind}"><span class="av arc"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></svg></span><div class="l">Archiv<small>${months} Monat${months===1?'':'e'}${total!=null?' · netto '+fm(total):''}</small></div><span class="chev">›</span></button></div>`}
 function list(){if(!years().length)return`<h1>Einnahmen</h1>${emptyHint()}`;
- const rs=incs(U.year).filter(r=>U.filter==='all'||srcOf(r)===U.filter),hid=incs(U.year,true).filter(r=>r.empty&&(U.filter==='all'||srcOf(r)===U.filter)).length;const g={};rs.forEach(r=>(g[mo(r)]=g[mo(r)]||[]).push(r));
- const ms=Object.keys(g).map(Number).sort((a,b)=>b-a);
- return`<h1>Einnahmen</h1>${yearSegs()}<div class="chips">${[['all','Alle'],...SRCS.map(k=>[k,SR(k).name])].map(([k,l])=>`<button class="chip ${U.filter===k?'on':''}" data-act="filter" data-v="${k}">${l}</button>`).join('')}</div>
- ${ms.length?ms.map(m=>{const list=g[m].slice().reverse();const n=list.filter(r=>!r.plan).reduce((s,r)=>s+(isFinite(sm(r).net)?sm(r).net:0),0),pn=list.filter(r=>r.plan).reduce((s,r)=>s+sm(r).net,0);
-  return`<section class="month"><div class="mh"><span>${MON[m]}</span><span>netto <b>${fm(n)}</b>${pn?' · Plan '+fm(pn):''}</span></div><div class="group ic">${list.map(r=>{const s=sm(r);return`<button class="cell ${r.plan?'plan':''}" data-act="open" data-id="${r.id}"><span class="av ${SR(srcOf(r)).cls}">${SR(srcOf(r)).l}</span><div class="l"><div class="one">${esc(r.sub&&r.sub.length>5?r.sub:title(r))}</div><small>${r.plan?'<span class="badge" style="margin:0 5px 0 0">Plan</span>':''}${unknownDay(r)?'Tag offen':String(r.date).slice(8,10)+'.'+String(r.date).slice(5,7)+'.'} · brutto ${fm(s.gross)}</small></div><div class="r"><b>${fm(s.net)}</b></div><span class="chev">›</span></button>`}).join('')}</div></section>`}).join(''):'<div class="card empty">Keine Einträge.</div>'}${hid?`<div class="foot">${hid} leere Platzhalter-Zeilen aus der Tabelle (Betrag 0) sind ausgeblendet.</div>`:''}`}
+ if(U.amonth)return archMonth();if(U.archive)return archiveView();
+ const rs=incs().filter(filt);const g={};rs.forEach(r=>(g[ymOf(r)]=g[ymOf(r)]||[]).push(r));
+ const live=Object.keys(g).filter(k=>!isArch(k)).sort(),arch=Object.keys(g).filter(isArch);
+ const cur=curYM();const hasCur=live.includes(cur)||isArch(cur);
+ return`<h1>Einnahmen</h1>${chipsHtml()}${archRow('archopen',arch.length,arch.reduce((x,k)=>x+sumN(g[k],false),0))}
+ ${hasCur?'':`<section class="month"><div class="mh"><span>${ymText(cur)}</span><span>netto <b>${fm(0)}</b></span></div><div class="card empty" style="padding:18px">Diesen Monat noch keine Einnahmen.<br><button class="link" data-act="tab" data-v="new">Einnahme erfassen</button></div></section>`}
+ ${live.map(k=>monthSection(k,g[k],true)).join('')}
+ <div class="foot">Ältere Monate wandern am Monatsanfang automatisch ins Archiv. Sie zählen weiter in der Übersicht.</div>`}
+function yearBlocks(keys,rowFn,sumFn){const ys=[...new Set(keys.map(k=>k.slice(0,4)))].sort().reverse();U.yopen=U.yopen||new Set([ys[0]]);
+ return ys.map(y=>{const ks=keys.filter(k=>k.startsWith(y)).sort().reverse();const open=U.yopen.has(y);const t=sumFn(ks);
+  return`<button class="yh" data-act="ytog" data-v="${y}"><span>${y}</span><span class="num">${t}<i class="tw ${open?'o':''}">›</i></span></button>${open?`<div class="group ic">${ks.map(rowFn).join('')}</div>`:''}`}).join('')}
+function archiveView(){const rs=incs().filter(filt);const g={};rs.forEach(r=>(g[ymOf(r)]=g[ymOf(r)]||[]).push(r));const keys=Object.keys(g).filter(isArch);
+ return`<div class="navbar"><button data-act="archclose">‹ Einnahmen</button></div><h1 style="margin-top:2px">Archiv</h1>${chipsHtml()}
+ ${keys.length?yearBlocks(keys,k=>`<button class="cell" data-act="amonth" data-v="${k}"><span class="av arc2">${+k.slice(5,7)}</span><div class="l">${MON[+k.slice(5,7)-1]}<small>brutto ${fm(sumG(g[k]))}</small></div><div class="r"><b>${fm(sumN(g[k],false))}</b>${g[k].some(r=>sm(r).manual)?'<br>'+manBadge:''}</div><span class="chev">›</span></button>`,
+  ks=>'netto '+fm(ks.reduce((x,k)=>x+sumN(g[k],false),0))+' · brutto '+fm(ks.reduce((x,k)=>x+sumG(g[k]),0))):'<div class="card empty">Noch nichts im Archiv.</div>'}`}
+function archMonth(){const k=U.amonth;const rs=incs().filter(r=>ymOf(r)===k&&filt(r));
+ return`<div class="navbar"><button data-act="amback">‹ Archiv</button></div><h1 style="margin-top:2px">${ymText(k)}</h1>
+ <div class="grid"><div class="tile"><span>Netto</span><b>${fm(sumN(rs,false))}</b></div><div class="tile"><span>Brutto</span><b>${fm(sumG(rs))}</b></div></div>
+ ${rs.length?`<div class="group ic">${rs.slice().reverse().map(incRow).join('')}</div>`:'<div class="card empty">Keine Einträge.</div>'}
+ <div class="group" style="margin-top:18px"><button class="cell btn" data-act="archtog" data-v="${k}">${isArch(k)?'Monat zurückholen':'Monat archivieren'}</button></div>`}
 
 function prettyF(r,f){const tb=T(r);return'= '+f.replace(/\[\$mwst\]/g,'MwSt').replace(/\[\$rate:[^\]]+\]/g,'Steuersatz').replace(/\[([^\]:]+):([A-Z]{1,2})\]/g,(m,id,c)=>{const o=S.recs[id];return o?`„${colLabel(T(o),c)}“ (${o.label||id})`:'?'}).replace(/\[([A-Z]{1,2})\]/g,(m,c)=>colLabel(tb,c)).replace(/\*/g,' × ').replace(/\//g,' ÷ ').replace(/-/g,' − ').replace(/\+/g,' + ').replace(/(\d)\.(\d)/g,'$1,$2')}
 function steps(r,s){let run=0,html='';const st=s.steps;
  st.forEach((x,i)=>{run+=x.amount;const base=i===0;const lab=base?(x.col==='B'?'Überweisung (brutto)':esc(x.label)):esc(x.label);
-  const cls=base?'':(x.coef<0?'neg':'pos')+(Calc.isTax(x.label)?' tax':'');
-  html+=`<div class="cell ${cls}"><div class="l">${base?'':(x.coef<0?'− ':'+ ')}${lab}${Calc.isTax(x.label)?'<span class="tag">Steuer</span>':''}${Calc.isMwst(x.label)?`<span class="tag">${pct(s.gross?(-x.amount)/(s.gross+x.amount)*100:NaN)} auf netto</span>`:''}</div><div class="r">${fm(Math.abs(x.amount))}</div></div>`;
+  const neg=x.manual?x.amount<0:x.coef<0;const cls=base?'':(neg?'neg':'pos')+(Calc.isTax(x.label)?' tax':'')+(x.manual?' manual':'');
+  html+=`<div class="cell ${cls}"><div class="l">${base?'':(neg?'− ':'+ ')}${lab}${x.manual?manBadge:''}${Calc.isTax(x.label)?'<span class="tag">Steuer</span>':''}${Calc.isMwst(x.label)?`<span class="tag">${pct(s.gross?(-x.amount)/(s.gross+x.amount)*100:NaN)} auf netto</span>`:''}</div><div class="r">${fm(Math.abs(x.amount))}</div></div>`;
   if(Calc.isMwst(x.label))html+=`<div class="cell subt"><div class="l">= Nach MwSt.</div><div class="r">${fm(run)}</div></div>`});
- return html+`<div class="cell tot"><div class="l">= Netto</div><div class="r">${fm(s.net)}</div></div>`}
+ return html+`<div class="cell tot"><div class="l">= Netto${s.manual?manBadge:''}</div><div class="r">${fm(s.net)}</div></div>`}
+// Netto direkt ändern (manuelle Überschreibung, mit Wiederherstellen)
+function netEditor(r,col,value,calc,manual,hint){const key=r.id+':'+col;
+ if(U.netEdit===key)return`<div class="netedit"><input id="netin" inputmode="decimal" value="${inpE(value)}" autocomplete="off"><div class="rowbtns"><button data-act="netcancel">Abbrechen</button><button class="primary" style="width:auto" data-act="netsave" data-v="${key}">Sichern</button></div></div>`;
+ return`<button class="netbtn" data-act="netedit" data-v="${key}" aria-label="Netto ändern"><span class="big">${fm(value)}</span><svg class="pen" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
+ ${manual?`<div class="ovline">${manBadge} berechnet: ${fm(calc)}</div><button class="link" data-act="netreset" data-v="${key}">Berechneten Wert wiederherstellen</button>`:`<div class="t">${hint}</div>`}`}
 function detail(){const r=S.recs[U.detail];if(!r){U.detail=null;return list()}const tb=T(r);
  if(isBud(r)){U.detail=null;return budget()}
  const s=sm(r);const texts=tb.cols.filter(([c])=>c!=='A'&&typeof r.v[c]==='string'&&r.v[c].trim()&&!r.f[c]);
  const shown=new Set(s.steps.map(x=>x.key));
  const other=tb.cols.filter(([c])=>c!=='A'&&!shown.has(r.id+':'+c)&&!(typeof r.v[c]==='string'&&!r.f[c])&&(r.f[c]||isFinite(Calc.val(r,c))));
- return`<div class="navbar"><button data-act="back">‹ Zurück</button><button data-act="edit" data-id="${r.id}">Bearbeiten</button></div>
- <div class="dhead"><span class="av ${SR(srcOf(r)).cls}" style="margin:0 auto;width:44px;height:44px;flex:none;border-radius:12px;font-size:20px">${SR(srcOf(r)).l}</span><h2>${esc(title(r))}${r.plan?'<span class="badge">Plan</span>':''}</h2><div class="t">${dtext(r)}</div><div class="big">${fm(s.net)}</div><div class="t">netto von ${fm(s.gross)} brutto</div></div>
+ return`<div class="navbar"><button data-act="back">‹ ${U.amonth?'Archiv':U.tab==='budget'?'Verteilung':'Einnahmen'}</button><button data-act="edit" data-id="${r.id}">Bearbeiten</button></div>
+ <div class="dhead"><span class="av ${SR(srcOf(r)).cls}" style="margin:0 auto;width:44px;height:44px;flex:none;border-radius:12px;font-size:20px">${SR(srcOf(r)).l}</span><h2>${esc(title(r))}${r.plan?'<span class="badge">Plan</span>':''}</h2><div class="t">${dtext(r)}</div>${netEditor(r,netCol(r),s.net,s.calcNet,s.manual,'netto von '+fm(s.gross)+' brutto · tippen zum Ändern')}${s.manual?`<div class="t">von ${fm(s.gross)} brutto</div>`:''}</div>
  ${(r.notes||[]).length?`<div class="warn"><b>Hinweis</b><ul>${r.notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul></div>`:''}
  <div class="gh">Rechenweg wie in der Tabelle</div><div class="group wf">${steps(r,s)}</div>
  <div class="grid" style="margin-top:12px"><div class="tile"><span>MwSt.</span><b>${fm(s.mwst)}</b></div><div class="tile"><span>Einkommensteuer</span><b>${fm(s.tax)}</b></div></div>
@@ -185,9 +220,17 @@ function budCols(tb){const cols=tb.cols||[];const u=cols.find(([c,l])=>/^(Übrig
 function linRefs(r,c){const f=r.f[c];if(!f||f==='#REF!')return[];return[...f.matchAll(/\[([^\]$:][^\]:]*):([A-Z]{1,2})\]/g)].map(m=>({id:m[1],c:m[2]}))}
 function donut(segs){const tot=segs.reduce((s,x)=>s+x.v,0)||1;const R=56,C=2*Math.PI*R;let off=0;
  return`<svg class="donut" viewBox="0 0 150 150" width="150" height="150"><circle cx="75" cy="75" r="${R}" fill="none" stroke="var(--fill)" stroke-width="22"/>`+segs.map(x=>{const l=x.v/tot*C;const s=`<circle cx="75" cy="75" r="${R}" fill="none" stroke="${x.col}" stroke-width="22" stroke-dasharray="${Math.max(l-1.2,0.01)} ${C}" stroke-dashoffset="${-off}" transform="rotate(-90 75 75)"/>`;off+=l;return s}).join('')+'</svg>'}
-function budget(){const y=U.year,bs=buds(y);if(!bs.length)return`<h1>Verteilung</h1>${yearSegs()}<div class="card empty">Für ${y} gibt es keine Verteilung.</div>`;
- let r=bs.find(x=>x.id===U.bm);if(!r){const ist=bs.filter(x=>!x.plan);const cm=today().slice(0,7);r=ist.filter(x=>String(x.date).slice(0,7)<=cm).pop()||ist.pop()||bs[0];U.bm=r.id}
- const tb=T(r),{u,b,note}=budCols(tb),i=bs.indexOf(r);const B=Calc.val(r,'B'),Cg=Calc.val(r,'C'),D=Calc.val(r,'D'),E=Calc.val(r,'E');
+const allBuds=()=>all().filter(isBud).sort(byDate);
+function budArchive(){const ab=allBuds().filter(x=>isArch(ymOf(x)));const by={};ab.forEach(x=>by[ymOf(x)]=x);
+ return`<div class="navbar"><button data-act="barchclose">‹ Verteilung</button></div><h1 style="margin-top:2px">Archiv</h1>
+ ${ab.length?yearBlocks(Object.keys(by),k=>{const x=by[k],tb=T(x),{u}=budCols(tb);const B=Calc.val(x,'B'),ub=u?Calc.val(x,u):NaN;return`<button class="cell" data-act="bmopen" data-id="${x.id}"><span class="av arc2">${+k.slice(5,7)}</span><div class="l">${MON[+k.slice(5,7)-1]}<small>Übrig ${fm(ub)}</small></div><div class="r"><b>${fm(B)}</b>${Calc.isOv(x,'B')?'<br>'+manBadge:''}</div><span class="chev">›</span></button>`},
+  ks=>'netto '+fm(ks.reduce((t,k)=>{const v=Calc.val(by[k],'B');return t+(isFinite(v)?v:0)},0))):'<div class="card empty">Noch nichts im Archiv.</div>'}`}
+function budget(){const AB=allBuds();if(!AB.length)return`<h1>Verteilung</h1><div class="card empty">Es gibt noch keine Verteilung.</div>`;
+ if(U.barch&&!U.bm)return budArchive();
+ const liveB=AB.filter(x=>!isArch(ymOf(x))),archB=AB.filter(x=>isArch(ymOf(x)));
+ let r=AB.find(x=>x.id===U.bm);if(!r){r=liveB.find(x=>ymOf(x)===curYM())||liveB[0]||archB[archB.length-1];U.bm=r.id}
+ const inArch=isArch(ymOf(r)),bs0=inArch?archB:liveB,y=yr(r),bs=AB.filter(x=>yr(x)===y);
+ const tb=T(r),{u,b,note}=budCols(tb),i=bs0.indexOf(r);const B=Calc.val(r,'B'),Cg=Calc.val(r,'C'),D=Calc.val(r,'D'),E=Calc.val(r,'E');
  const ub=u?Calc.val(r,u):NaN;const fixed=u?Calc.waterfall(r,u,false).filter(x=>x.key==='#').reduce((s,x)=>s-x.amount,0):0;
  const segs=[];if(Cg>0)segs.push({k:'C',n:colLabel(tb,'C'),v:Cg});b.forEach(([c,l])=>{const v=Calc.val(r,c);if(v>0)segs.push({k:c,n:l,v})});if(fixed>0.005)segs.push({k:'#',n:'Feste Beträge (in der Übrig-Formel)',v:fixed});if(ub>0)segs.push({k:u,n:'Übrig',v:ub});
  segs.forEach((s,j)=>s.col=s.k===u?'var(--green)':s.k==='C'?'var(--accent)':PALETTE[(j+2)%PALETTE.length]);const st=segs.reduce((s,x)=>s+x.v,0);
@@ -196,10 +239,12 @@ function budget(){const y=U.year,bs=buds(y);if(!bs.length)return`<h1>Verteilung<
  // Plan vs Ist
  const rowsPI=[['C',colLabel(tb,'C')],...b];if(u)rowsPI.push([u,'Übrig']);const sumBy=(c,pl)=>bs.filter(x=>!!x.plan===pl).reduce((s,x)=>{const v=Calc.val(x,c);return s+(isFinite(v)?v:0)},0);const anyPlan=bs.some(x=>x.plan);
  const retR=all().filter(x=>T(x).kind==='ret'&&yr(x)===y).sort(byDate);
- return`<h1>Verteilung</h1>${yearSegs()}
- <div class="pm"><button data-act="bm" data-v="${i-1}" ${i<=0?'disabled style="opacity:.3"':''}>‹</button><span>${MON[mo(r)]} ${y}${r.plan?'<span class="badge">Plan</span>':''}</span><button data-act="bm" data-v="${i+1}" ${i>=bs.length-1?'disabled style="opacity:.3"':''}>›</button></div>
- ${isFinite(B)?'':`<div class="warn"><b>Netto Gesamt fehlt.</b> In der Numbers-Tabelle ist die Formel für diesen Monat kaputt (#REF!). Laut deinen Einnahmen waren es in ${MON[mo(r)]} netto ${fm(incM)}.</div>`}
- <div class="card"><div class="hero"><div class="lbl">Netto Gesamt</div><div class="big">${fm(B)}</div><div class="sub">${refs.length?`aus ${refs.length} Einnahme${refs.length>1?'n':''}`:''}${D?` · + ${fm(D)} übrige MwSt.`:''}</div></div>
+ const Bm=Calc.isOv(r,'B'),Bc=Calc.raw(r,'B');
+ return`${inArch?`<div class="navbar"><button data-act="bmback">‹ Archiv</button><button data-act="archtog" data-v="${ymOf(r)}">Zurückholen</button></div><h1 style="margin-top:2px">Verteilung</h1>`:`<h1>Verteilung</h1>`}
+ <div class="pm"><button data-act="bm" data-v="${i-1}" ${i<=0?'disabled style="opacity:.3"':''}>‹</button><span>${MON[mo(r)]} ${y}${r.plan?'<span class="badge">Plan</span>':''}</span><button data-act="bm" data-v="${i+1}" ${i>=bs0.length-1?'disabled style="opacity:.3"':''}>›</button></div>
+ ${inArch?'':archRow('barchopen',archB.length,null)}${inArch?'':`<div class="mfoot" style="text-align:right;margin:-4px 0 8px"><button class="link" data-act="archtog" data-v="${ymOf(r)}">Monat archivieren</button></div>`}
+ ${isFinite(B)?'':`<div class="warn"><b>Netto Gesamt fehlt.</b> Tippe auf den Betrag, um ihn selbst einzutragen. In der Numbers-Tabelle ist die Formel für diesen Monat kaputt (#REF!). Laut deinen Einnahmen waren es in ${MON[mo(r)]} netto ${fm(incM)}.</div>`}
+ <div class="card"><div class="hero"><div class="lbl">Netto Gesamt</div>${netEditor(r,'B',B,Bc,Bm,'tippen zum Ändern')}<div class="sub">${refs.length?`aus ${refs.length} Einnahme${refs.length>1?'n':''}`:''}${D?` · + ${fm(D)} übrige MwSt.`:''}</div></div>
  ${segs.length?`<div class="donutwrap" style="margin-top:14px">${donut(segs)}<div><div class="lbl" style="color:var(--sec);font-size:13px;font-weight:600">ÜBRIG</div><div style="font-size:26px;font-weight:700" class="num ${ub<0?'down':'up'}">${fm(ub)}</div><div class="sub" style="color:var(--sec);font-size:14px">${isFinite(B)&&B?pct(ub/B*100)+' vom Netto':''}</div></div></div>`:''}</div>
  ${E&&isFinite(E)?`<div class="info">Gehalt fehlend: ${fm(E)} – so viel fehlt noch bis zum Gehalt von ${fm(Cg)}.</div>`:''}
  <div class="gh"><span>Aufteilung</span><button class="link" data-act="bedit" style="font-size:13px;padding:0;text-transform:none">Bearbeiten</button></div><div class="group">${segs.map(s=>`<div class="cell"><div class="l"><i class="dotc" style="background:${s.col};margin-right:8px"></i>${esc(s.n)}</div><div class="r"><b>${fm(s.v)}</b> · ${pct(st?s.v/st*100:NaN)}</div></div>`).join('')||'<div class="cell"><div class="l" style="color:var(--sec)">Nichts verteilt.</div></div>'}${ub<0?`<div class="cell"><div class="l down">Übrig (negativ)</div><div class="r down">${fm(ub)}</div></div>`:''}</div>
@@ -248,7 +293,7 @@ async function inflate(bytes){const ds=new DecompressionStream('deflate-raw');re
 async function sha(s){const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return[...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,'0')).join('')}
 function importObj(o){if(!o||o.app!=='einkommen'||!Array.isArray(o.records))throw new Error('Das ist keine Einkommen-Datei.');
  if(o.kind==='backup'){if(!confirm('Backup laden? Das ersetzt alle Daten, die gerade in der App sind.'))return null;
-  S.tables=o.tables||{};S.recs={};o.records.forEach(r=>S.recs[r.id]=r);S.settings=Object.assign(defaults().settings,o.settings||{});S.setups=o.setups||S.setups;save();return{add:o.records.length,skip:0,notes:0}}
+  S.tables=o.tables||{};S.recs={};o.records.forEach(r=>S.recs[r.id]=r);S.settings=Object.assign(defaults().settings,o.settings||{});S.setups=o.setups||S.setups;S.archive=o.archive||{};save();return{add:o.records.length,skip:0,notes:0}}
  let add=0,skip=0,notes=0;for(const[k,t]of Object.entries(o.tables||{}))if(!S.tables[k])S.tables[k]=t;
  for(const r of o.records){if(S.recs[r.id]){skip++;continue}S.recs[r.id]=r;add++;if((r.notes||[]).length)notes++}
  Calc.setDB(S);SUM=new Map();deriveRates();save();return{add,skip,notes}}
@@ -256,10 +301,10 @@ async function importSetup(code){code=code.trim().replace(/^.*#setup=/,'');const
  if(S.setups.includes(fp)&&all().length){U.result={already:true};return}
  const o=JSON.parse(await inflate(unb64u(code)));const res=importObj(o);if(res){S.setups.push(fp);save();U.result=res;const ys=years();U.year=ys.includes(new Date().getFullYear())?new Date().getFullYear():ys[ys.length-1]}}
 function download(name,text,type){const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}
-function exportBackup(){const o={app:'einkommen',v:1,kind:'backup',created:new Date().toISOString(),tables:S.tables,records:all(),settings:S.settings,setups:S.setups};download('einkommen-backup-'+today()+'.json',JSON.stringify(o),'application/json');toast('Backup erstellt')}
+function exportBackup(){const o={app:'einkommen',v:2,kind:'backup',created:new Date().toISOString(),tables:S.tables,records:all(),settings:S.settings,setups:S.setups,archive:S.archive||{}};download('einkommen-backup-'+today()+'.json',JSON.stringify(o),'application/json');toast('Backup erstellt')}
 function exportCSV(){const n=x=>isFinite(x)?(+x.toFixed(2)).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2,useGrouping:false}):'';const q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
- const rows=[['Datum','Quelle','Art','Bezeichnung','Brutto','MwSt','Einkommensteuer','Abzüge','Netto','Status']];
- for(const r of incs(null,true)){const s=sm(r);rows.push([unknownDay(r)?String(r.date).slice(0,7):r.date,SR(srcOf(r)).name,r.sub||'',r.label,n(s.gross),n(s.mwst),n(s.tax),n(s.ded),n(s.net),r.plan?'Plan':'Ist'].map((x,i)=>i>=4&&i<=8?x:q(x)))}
+ const rows=[['Datum','Quelle','Art','Bezeichnung','Brutto','MwSt','Einkommensteuer','Abzüge','Netto','Status','Netto manuell','Netto berechnet']];
+ for(const r of incs(null,true)){const s=sm(r);rows.push([unknownDay(r)?String(r.date).slice(0,7):r.date,SR(srcOf(r)).name,r.sub||'',r.label,n(s.gross),n(s.mwst),n(s.tax),n(s.ded),n(s.net),r.plan?'Plan':'Ist',s.manual?'ja':'nein',n(s.calcNet)].map((x,i)=>(i>=4&&i<=8)||i===11?x:q(x)))}
  download('einkommen-'+today()+'.csv','\ufeff'+rows.map(r=>r.join(';')).join('\r\n'),'text/csv');toast('CSV erstellt')}
 
 /* ---------- PIN ---------- */
@@ -277,6 +322,11 @@ async function pinKey(k){if(k==='x'){$('#lock').hidden=true;return}if(k==='b'){p
 let hiddenAt=0;document.addEventListener('visibilitychange',()=>{if(document.hidden)hiddenAt=Date.now();else if(S.pin&&hiddenAt&&Date.now()-hiddenAt>60000&&$('#lock').hidden)showLock('unlock')});
 
 /* ---------- Events ---------- */
+const splitKey=k=>{const i=k.lastIndexOf(':');return[k.slice(0,i),k.slice(i+1)]};
+function saveNet(key,txt){const[rid,c]=splitKey(key);const r=S.recs[rid];if(!r)return;const x=num(txt);if(!isFinite(x)){toast('Bitte einen Betrag eingeben');return}
+ const calc=Calc.raw(r,c);r.ov=r.ov||{};if(isFinite(calc)&&Math.abs(calc-x)<0.005){delete r.ov[c];if(!Object.keys(r.ov).length)delete r.ov}else r.ov[c]=Math.round(x*100)/100;
+ U.netEdit=null;save();toast('Netto gesichert');render()}
+document.addEventListener('keydown',e=>{if(e.target.id==='netin'){if(e.key==='Enter'){e.preventDefault();saveNet(U.netEdit,e.target.value)}if(e.key==='Escape'){U.netEdit=null;render()}}});
 function toast(t){const e=$('#toast');e.textContent=t;e.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>e.hidden=true,2400)}
 document.addEventListener('click',async e=>{const p=e.target.closest('[data-pin]');if(p){pinKey(p.dataset.pin);return}
  const tb=e.target.closest('.tabbar button');if(tb){setTab(tb.dataset.tab);return}
@@ -285,15 +335,24 @@ document.addEventListener('click',async e=>{const p=e.target.closest('[data-pin]
  case'tab':setTab(v);break;
  case'year':U.year=+v;U.bm=null;render();break;
  case'filter':U.filter=v;if(U.tab!=='list'){U.tab='list'}render();break;
- case'open':U.detail=id;render();scrollTo(0,0);break;
- case'back':U.detail=null;render();break;
+ case'open':U.detail=id;U.netEdit=null;render();scrollTo(0,0);break;
+ case'back':U.detail=null;U.netEdit=null;render();break;
  case'edit':{const r=JSON.parse(JSON.stringify(S.recs[id]));U.form={mode:'edit',src:srcOf(r),sub:r.sub,rec:r,orig:JSON.parse(JSON.stringify(r.f))};U.detail=null;render();scrollTo(0,0);break}
  case'cancel':U.detail=U.form?.rec?.id;U.form=null;render();break;
  case'save':saveForm();break;
  case'fsrc':{const date=U.form.rec?.date||today(),B=U.form.rec?.v?.B,pl=U.form.rec?.plan;U.form={mode:'new',src:v,rec:{date,v:{B},plan:pl}};initForm();U.form.rec&&(U.form.rec.date=date);render();break}
  case'fsub':{const date=U.form.rec.date,B=U.form.rec.v.B,pl=U.form.rec.plan;U.form.sub=v;initForm();U.form.rec.date=date;if(B)U.form.rec.v.B=B;U.form.rec.plan=pl;render();break}
  case'del':if(confirm('Diesen Eintrag wirklich löschen?')){delete S.recs[id];save();U.detail=null;toast('Gelöscht');render()}break;
- case'bm':{const bs=buds(U.year);const r=bs[+v];if(r){U.bm=r.id;render()}break}
+ case'bm':{const AB=allBuds(),cur=AB.find(x=>x.id===U.bm),ia=cur&&isArch(ymOf(cur));const L=AB.filter(x=>isArch(ymOf(x))===!!ia);const r=L[+v];if(r){U.bm=r.id;U.netEdit=null;render()}break}
+ case'archopen':U.archive=true;U.amonth=null;render();scrollTo(0,0);break;case'archclose':U.archive=false;render();break;
+ case'amonth':U.amonth=v;render();scrollTo(0,0);break;case'amback':U.amonth=null;render();break;
+ case'ytog':U.yopen=U.yopen||new Set();U.yopen.has(v)?U.yopen.delete(v):U.yopen.add(v);render();break;
+ case'archtog':{const was=isArch(v);toggleArch(v);toast(was?'Zurückgeholt':'Archiviert');if(U.tab==='budget'){U.bm=null;U.barch=false}else{U.amonth=null}render();break}
+ case'barchopen':U.barch=true;U.bm=null;render();scrollTo(0,0);break;case'barchclose':U.barch=false;U.bm=null;render();break;
+ case'bmopen':U.bm=id;U.barch=true;render();scrollTo(0,0);break;case'bmback':U.bm=null;U.barch=true;render();break;
+ case'netedit':U.netEdit=v;render();{const i=$('#netin');if(i){i.focus();i.select()}}break;case'netcancel':U.netEdit=null;render();break;
+ case'netsave':saveNet(v,$('#netin').value);break;
+ case'netreset':{const[rid,c]=splitKey(v);const r=S.recs[rid];if(r&&r.ov){delete r.ov[c];if(!Object.keys(r.ov).length)delete r.ov}save();toast('Berechneter Wert wiederhergestellt');render();break}
  case'bedit':U.bedit=true;render();break;case'bcancel':U.bedit=false;render();break;
  case'bsave':{const r=S.recs[U.bm];view.querySelectorAll('[data-bcol]').forEach(i=>{const x=num(i.value);r.v[i.dataset.bcol]=isFinite(x)?x:0});save();U.bedit=false;toast('Gesichert');render();break}
  case'theme':S.settings.theme=v;save();applyTheme();render();break;
