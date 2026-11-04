@@ -107,3 +107,10 @@ body.nohints .hint{display:none}
 .nowm .lbl{display:flex;align-items:center;gap:6px}.nowdot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(52,199,89,.2)}
 .nowl{margin:12px -16px -16px;border-radius:0 0 14px 14px;box-shadow:none;border-top:.5px solid var(--sep)}
 .chart .now{fill:#fff;font-weight:700}.chart .nowbg{fill:var(--accent)}
+/* v7: Rhythmus */
+.cell.rhrow{padding-top:0;gap:8px}.cell.rhrow::before{display:none}
+.rhseg{flex:1;display:flex;background:var(--fill);border-radius:8px;padding:2px;gap:2px}
+.rhseg button{flex:1;padding:5px 2px;border-radius:6px;font-size:12px;font-weight:500;color:var(--sec)}
+.rhseg button.on{background:var(--card);color:var(--text);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.tag.rh{background:var(--fill);color:var(--sec)}.tag.rh-q{background:rgba(175,82,222,.14);color:#af52de}.tag.rh-e{background:rgba(255,149,0,.15);color:var(--orange)}
+.tag.rh{padding:1px 6px;border-radius:5px;font-weight:600;white-space:nowrap;display:inline-block}

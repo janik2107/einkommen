@@ -1,5 +1,5 @@
 'use strict';
-const VERSION='ek-v6',KEY='einkommen-v1';
+const VERSION='ek-v7',KEY='einkommen-v1';
 const $=s=>document.querySelector(s),view=$('#view');
 const EUR=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
 const fm=x=>isFinite(x)?EUR.format(Math.abs(x)<.005?0:x):'—';
@@ -13,7 +13,7 @@ const num=s=>{s=String(s??'').trim().replace(/[€\s]/g,'');if(!s)return NaN;if(
 const inpE=x=>isFinite(x)&&x!==''?(+x).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
 const inp=x=>isFinite(x)&&x!==''?(+(+x).toFixed(2)).toLocaleString('de-DE',{maximumFractionDigits:2,useGrouping:false}):'';
 const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
-function defaults(){return{v:5,archive:{},tables:{},recs:{},settings:{mwst:19,rates:{},defaults:{},theme:'auto'},pin:null,setups:[]}}
+function defaults(){return{v:7,archive:{},tables:{},recs:{},settings:{mwst:19,rates:{},defaults:{},rhythm:{},theme:'auto'},pin:null,setups:[]}}
 function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.recs){s.settings=Object.assign(defaults().settings,s.settings);s.setups=s.setups||[];s.archive=s.archive||{};return s}}catch(e){}return defaults()}
 let S=load();Calc.setDB(S);
 let SUM=new Map();migrate(S,true);buildSrc();
@@ -21,7 +21,7 @@ function save(){localStorage.setItem(KEY,JSON.stringify(S));Calc.setDB(S);SUM=ne
 // Quellen (Arbeitgeber/Auftraggeber) kommen nur aus den eigenen Daten, nicht aus dem Code
 // v1/v2 → v3: Netto-Korrekturen aus v2 werden in „Nach MwSt.“ umgerechnet (gleiches Netto); Netto-Gesamt-Korrekturen entfallen;
 // Zeilen ohne Unterart im neuesten Jahr einer Quelle bekommen die Haupt-Unterart
-function migrate(st,persist,force){const from=st.v||1;if(from>=5&&!force)return;Calc.setDB(st);const recs=Object.values(st.recs);const T_=r=>st.tables[r.t]||{};
+function migrate(st,persist,force){const from=st.v||1;if(from>=7&&!force)return;Calc.setDB(st);const recs=Object.values(st.recs);const T_=r=>st.tables[r.t]||{};
  for(const r of recs){if(!r.ov)continue;const tb=T_(r);
   if(tb.kind==='inc'){const nc=r.net||tb.net;if(r.ov[nc]!=null){const target=+r.ov[nc];delete r.ov[nc];const c=Calc.nachMwstCol(r);let done=false;
     if(c){Calc.clear();const d0=Calc.raw(r,c);r.ov[c]=d0;Calc.clear();const n0=Calc.val(r,nc);r.ov[c]=d0+1000;Calc.clear();const n1=Calc.val(r,nc);const k=(n1-n0)/1000;
@@ -35,7 +35,7 @@ function migrate(st,persist,force){const from=st.v||1;if(from>=5&&!force)return;
   const pre=new Set(rs.filter(r=>r.sub&&String(r.label||'').toUpperCase().startsWith(r.sub.toUpperCase()+' ')).map(r=>r.sub));
   const main=(ry.find(r=>r.sub&&pre.has(r.sub))||{}).sub;if(!main)continue;
   for(const r of rs)if(!r.sub){r.sub=main;if(r.label&&!String(r.label).toUpperCase().startsWith(main.toUpperCase()+' '))r.label=main+' '+r.label}}
- st.v=5;Calc.setDB(S===st?st:S);if(persist)try{localStorage.setItem(KEY,JSON.stringify(st))}catch(e){}}
+ st.settings=st.settings||{};st.settings.rhythm=st.settings.rhythm||{};st.v=7;Calc.setDB(S===st?st:S);if(persist)try{localStorage.setItem(KEY,JSON.stringify(st))}catch(e){}}
 function buildSrc(){const g={};for(const r of Object.values(S.recs)){const t=S.tables[r.t];if(!t||t.kind!=='inc'||!t.source)continue;g[t.source]=(g[t.source]||0)+(Calc.numv(r.v&&r.v.B)||0)}
  SRCS=Object.keys(g).sort((a,b)=>g[b]-g[a]);SRC={};SRCS.forEach((k,i)=>SRC[k]={name:k.length>5&&k===k.toUpperCase()?k[0]+k.slice(1).toLowerCase():k,cls:'s'+(i%4),col:`var(--s${i%4})`,l:k[0].toUpperCase()})}
 const SR=k=>SRC[k]||NOSRC;
@@ -159,11 +159,13 @@ function nachMwstRow(r,s,run){const c=Calc.nachMwstCol(r);if(!c)return`<div clas
 function lineKey(r,x){return x.extra?'x:'+x.xid:(x.key.startsWith(r.id+':')?'c:'+x.col:null)}
 function steps(r,s){let run=0,html='';const st=s.steps;const ed=U.wfEdit===r.id;
  st.forEach((x,i)=>{run+=x.amount;if(x.manual)return;const base=i===0;if(!base&&x.col&&r.removed&&x.col in r.removed&&!x.extra)return;
-  if(ed&&!base){const k=lineKey(r,x);const own=!!k,isVal=x.extra||(own&&!r.f[x.col]);
-   html+=`<div class="cell erow">${isVal?`<button class="rm" data-act="lrm" data-v="${k}" aria-label="Entfernen">−</button>`:'<span class="rm0"></span>'}${own?`<input class="lname" data-lname="${k}" value="${esc(x.label)}">`:`<div class="l">${esc(x.label)}</div>`}${isVal?`<input class="lamt" data-lamt="${k}" inputmode="decimal" value="${inpE(Math.abs(x.amount))}">`:`<div class="r">${fm(Math.abs(x.amount))}</div>`}</div>`;
+  if(ed&&!base){const k=lineKey(r,x);const own=!!k,isVal=x.extra||(own&&(!r.f[x.col]||isConstF(r.f[x.col])));
+   html+=`<div class="cell erow${isVal?' hasrh':''}">${isVal?`<button class="rm" data-act="lrm" data-v="${k}" aria-label="Entfernen">−</button>`:'<span class="rm0"></span>'}${own?`<input class="lname" data-lname="${k}" value="${esc(x.label)}">`:`<div class="l">${esc(x.label)}</div>`}${isVal?`<input class="lamt" data-lamt="${k}" inputmode="decimal" value="${x.extra?inpE(Math.abs(x.amount)):amtIn(r,x.col)}">`:`<div class="r">${fm(Math.abs(x.amount))}</div>`}</div>`;
+   if(isVal&&x.coef<0){const h=rhOf(r,k);html+=`<div class="cell rhrow"><span class="rm0"></span><div class="rhseg">${['m','q','e'].map(o=>`<button class="${h===o?'on':''}" data-act="rh" data-v="${k}|${o}">${RH[o]}</button>`).join('')}</div></div>`}
    if(Calc.isMwst(x.tlabel)){const nx=st[i+1];html+=`<div class="cell subt"><div class="l">= Nach MwSt.</div><div class="r">${fm(run+(nx&&nx.manual?nx.amount:0))}</div></div>`}return}const lab=base?(x.col==='B'?'Überweisung (brutto)':esc(x.label)):esc(x.label);
   const neg=x.coef<0;const cls=base?'':(neg?'neg':'pos')+(Calc.isTax(x.tlabel)?' tax':'');
-  html+=`<div class="cell ${cls}"><div class="l">${base?'':(neg?'− ':'+ ')}${lab}${Calc.isTax(x.tlabel)?'<span class="tag">Steuer</span>':''}${Calc.isMwst(x.tlabel)?`<span class="tag">${pct(s.gross?(-x.amount)/(s.gross+x.amount)*100:NaN)} auf netto</span>`:''}</div><div class="r">${fm(Math.abs(x.amount))}</div></div>`;
+  const lk=!base&&neg&&!Calc.isTax(x.tlabel)&&!Calc.isMwst(x.tlabel)&&(x.extra||(x.key.startsWith(r.id+':')&&(!r.f[x.col]||isConstF(r.f[x.col]))))?lineKey(r,x):null;
+  html+=`<div class="cell ${cls}"><div class="l">${base?'':(neg?'− ':'+ ')}${lab}${lk?rhTag(r,lk):''}${Calc.isTax(x.tlabel)?'<span class="tag">Steuer</span>':''}${Calc.isMwst(x.tlabel)?`<span class="tag">${pct(s.gross?(-x.amount)/(s.gross+x.amount)*100:NaN)} auf netto</span>`:''}</div><div class="r">${fm(Math.abs(x.amount))}</div></div>`;
   if(Calc.isMwst(x.tlabel)){const nx=st[i+1];html+=nachMwstRow(r,s,run+(nx&&nx.manual?nx.amount:0))}});
  return html+`<div class="cell tot"><div class="l">= Netto</div><div class="r">${fm(s.net)}</div></div>`}
 function detail(){const r=S.recs[U.detail];if(!r){U.detail=null;return list()}const tb=T(r);if(isInc(r))return detailInc(r,tb);
@@ -209,7 +211,7 @@ function detailInc(r,tb){const s=sm(r);const ed=U.wfEdit===r.id;
  <div class="group" style="margin-top:22px"><button class="cell btn danger" data-act="del" data-id="${r.id}">Einnahme löschen</button></div>
  <div class="foot hint">Quelle: ${esc(tb.name)}</div>`}
 /* ---------- Abhaken ---------- */
-function checkItems(r){if(isInc(r)){const s=sm(r);return s.steps.slice(1).filter(x=>!x.manual&&x.amount<-0.004&&!(x.col&&!x.extra&&r.removed&&x.col in r.removed)).map(x=>({key:lineKey(r,x)||x.key,name:x.label,tag:Calc.isMwst(x.tlabel)?'ans Finanzamt':Calc.isTax(x.tlabel)?'Steuer-Rücklage':'',amount:-x.amount}))}
+function checkItems(r){if(isInc(r)){const s=sm(r);return s.steps.slice(1).filter(x=>!x.manual&&x.amount<-0.004&&!(x.col&&!x.extra&&r.removed&&x.col in r.removed)).map(x=>{const k=lineKey(r,x);const isv=k&&(x.extra||!r.f[x.col]||isConstF(r.f[x.col]));return{key:k||x.key,name:x.label,tag:Calc.isMwst(x.tlabel)?'ans Finanzamt':Calc.isTax(x.tlabel)?'Steuer-Rücklage':isv?rhInfo(r,k):'',amount:-x.amount}})}
  if(isBud(r)){const tb=T(r),{b}=budCols(tb);const L=[];const add=(k,n,v)=>{if(isFinite(v)&&v>0.004)L.push({key:k,name:n,amount:v,tag:''})};
   if(!(r.removed&&'C' in r.removed))add('c:C',rl(r,'C'),Calc.val(r,'C'));b.forEach(([c,l])=>{if(!(r.removed&&c in r.removed))add('c:'+c,rl(r,c,l),Calc.val(r,c))});(r.extra||[]).forEach(x=>add('x:'+x.id,x.name,Calc.numv(x.amount)));return L}return[]}
 function openCount(r){if(!r.chk||r.plan)return 0;return checkItems(r).filter(x=>!(r.done&&r.done[x.key])).length}
@@ -226,16 +228,45 @@ function renderSheet(){let el=$('#sheet');if(!el){el=document.createElement('div
  <p class="q">Stimmt die Überweisungssumme?</p>${sh.editSum?`<input id="shsum" class="bigin" inputmode="decimal" value="${inpE(sh.sum)}">`:`<div class="bigv num">${fm(sh.sum)}</div>`}
  <div class="rowbtns">${sh.editSum?`<button data-act="shcancel">Abbrechen</button><button class="primary" style="width:auto;flex:1" data-act="shok">Übernehmen</button>`:`<button data-act="shedit">Ändern</button><button class="primary" style="width:auto;flex:1" data-act="shok">Ja, passt</button>`}</div></div>`;
  if(sh.editSum){const i=$('#shsum');i.focus();i.select()}}
-function setFormDate(F,v){const d=F.rec,old=String(d.date);d.date=v;if(F.mode==='new'&&old.slice(0,4)!==v.slice(0,4)){const rx=/\[\$rate:([A-Z]+):\d+\]/;for(const c in d.f)d.f[c]=d.f[c].replace(rx,'[$rate:$1:'+v.slice(0,4)+']');for(const c in F.orig)F.orig[c]=F.orig[c].replace(rx,'[$rate:$1:'+v.slice(0,4)+']')}}
+function setFormDate(F,v){const d=F.rec,old=String(d.date);d.date=v;if(F.mode==='new'&&old.slice(0,7)!==v.slice(0,7))rhApply(d,F.src,F.sub,v);if(F.mode==='new'&&old.slice(0,4)!==v.slice(0,4)){const rx=/\[\$rate:([A-Z]+):\d+\]/;for(const c in d.f)d.f[c]=d.f[c].replace(rx,'[$rate:$1:'+v.slice(0,4)+']');for(const c in F.orig)F.orig[c]=F.orig[c].replace(rx,'[$rate:$1:'+v.slice(0,4)+']')}}
 function sheetOk(){const sh=U.sheet;const date=$('#shdate').value||sh.date;let sum=sh.sum;if(sh.editSum){const x=num($('#shsum').value);if(!(x>0)){toast('Bitte Betrag eingeben');return}sum=x}
  U.sheet=null;
  if(sh.mode==='form'){const F=U.form;setFormDate(F,date);if(!F.rec.f.B)F.rec.v.B=sum;const id=saveForm(true);if(id){const r=S.recs[id];r.chk=true;save();U.check=id;render();scrollTo(0,0)}return}
  if(sh.mode==='plan'){const r=S.recs[sh.id];r.date=date;r.plan=false;delete r.empty;if(!r.f.B)r.v.B=sum;r.notes=(r.notes||[]).filter(n=>!/Tag unbekannt/.test(n));r.notes.push('Überweisung am '+date.split('-').reverse().join('.')+' bestätigt');r.chk=true;save();U.detail=r.id;U.check=r.id;toast('Eingang gesichert');render();scrollTo(0,0)}}
 /* ---------- Posten bearbeiten ---------- */
+const CONSTF=/^[\d\s.+\-*/()]+$/;
+const isConstF=f=>!!f&&f!=='#REF!'&&CONSTF.test(f);
+const fToIn=f=>String(f).replace(/\s/g,'').replace(/\./g,',');
+// "1.014,50" -> {v}, "500+75,5" -> {f:'500+75.5',v}
+function parseAmt(t){t=String(t??'').trim().replace(/[€\s]/g,'');if(t==='')return{v:0};
+ if(/[+*/()]/.test(t)||/.-/.test(t)){const e=t.replace(/,/g,'.');if(!CONSTF.test(e))return null;try{const v=Function('"use strict";return('+e+')')();return isFinite(v)?{f:e,v:+(+v).toFixed(6)}:null}catch(_){return null}}
+ const v=num(t);return isFinite(v)?{v}:null}
+function setColAmt(r,c,t){const a=parseAmt(t);if(!a)return false;if(a.f){r.f[c]=a.f;r.v[c]=a.v}else{delete r.f[c];r.v[c]=a.v}return true}
+const amtIn=(r,c)=>isConstF(r.f[c])&&/[+*/()]|.-/.test(r.f[c])?fToIn(r.f[c]):inpE(Calc.val(r,c));
+const RH={m:'monatlich',q:'vierteljährlich',e:'einmalig'};
+const dkOf=r=>dkey(srcOf(r),r.sub||'');
+const rulesOf=dk=>{S.settings.rhythm=S.settings.rhythm||{};return S.settings.rhythm[dk]||(S.settings.rhythm[dk]={})};
+const rhDef=label=>/^Sonstig/i.test(String(label||'').trim())?'e':'m';
+const ymIdx=ym=>+String(ym).slice(0,4)*12+ +String(ym).slice(5,7)-1;
+const qDue=(st,ym)=>((ymIdx(ym)-ymIdx(st))%3+3)%3===0;
+function rhOf(r,k){const R=(S.settings.rhythm||{})[dkOf(r)]||{};
+ if(k.startsWith('x:')){const x=(r.extra||[]).find(e=>'x:'+e.id===k);if(!x)return'e';if(x.rule&&R[x.rule])return R[x.rule].r;return'e'}
+ const ru=R[k];return ru?ru.r:rhDef(colLabel(T(r),k.slice(2)))}
+function rhInfo(r,k){const R=(S.settings.rhythm||{})[dkOf(r)]||{},x=k.startsWith('x:')?(r.extra||[]).find(e=>'x:'+e.id===k):null,ru=x?R[x.rule]:R[k];const h=rhOf(r,k);
+ if(h==='q'&&ru){const nx=[0,1,2].map(i=>ymIdx(String(r.date).slice(0,7))+i).find(i=>((i-ymIdx(ru.s))%3+3)%3===0);return RH.q+(nx!=null?' · ab '+MON[ymIdx(ru.s)%12].slice(0,3):'')}return RH[h]}
+const rhTag=(r,k)=>k?`<span class="tag rh rh-${rhOf(r,k)}">${rhInfo(r,k)}</span>`:'';
+function setRhythm(r,k,val){const R=rulesOf(dkOf(r)),ym=String(r.date).slice(0,7);
+ if(k.startsWith('x:')){const x=(r.extra||[]).find(e=>'x:'+e.id===k);if(!x)return;if(val==='e'){if(x.rule)delete R[x.rule];delete x.rule}else{const rk=x.rule||k;R[rk]={r:val,s:ym,a:Calc.numv(x.amount),n:x.name};x.rule=rk}}
+ else{const c=k.slice(2);if(val===rhDef(colLabel(T(r),c))&&val!=='q')delete R[k];else R[k]={r:val,s:ym,a:+Calc.val(r,c).toFixed(2)}}}
+// Betrag/Name eines wiederkehrenden Postens auch für künftige Monate übernehmen
+function lineFuture(r,k,del){const R=rulesOf(dkOf(r)),h=rhOf(r,k);
+ if(k.startsWith('x:')){const x=(r.extra||[]).find(e=>'x:'+e.id===k);const ru=x&&x.rule&&R[x.rule];if(!ru)return;if(del)delete R[x.rule];else{ru.a=Calc.numv(x.amount);ru.n=x.name}return}
+ const c=k.slice(2),dk=dkOf(r);if(h==='q'){if(del)delete R[k];else R[k].a=+Calc.val(r,c).toFixed(2)}
+ if(h==='m'||(h==='q'&&del)){S.settings.defaults[dk]=S.settings.defaults[dk]||{};S.settings.defaults[dk][c]=del?0:+Calc.val(r,c).toFixed(2)}}
 function applyLine(r,k,what,val){const t=k.slice(0,1),id=k.slice(2);
- if(t==='x'){const x=(r.extra||[]).find(e=>e.id===id);if(!x)return;if(what==='name')x.name=val||'Eigener Posten';else x.amount=isFinite(num(val))?num(val):0}
- else{if(what==='name'){r.lbl=r.lbl||{};const tl=colLabel(T(r),id);if(!val||val===tl)delete r.lbl[id];else r.lbl[id]=val;if(!Object.keys(r.lbl).length)delete r.lbl}else{const x=num(val);r.v[id]=isFinite(x)?x:0}}}
-function removeLine(r,k){const t=k.slice(0,1),id=k.slice(2);if(t==='x'){r.extra=(r.extra||[]).filter(e=>e.id!==id);if(!r.extra.length){delete r.extra;delete r.xcol}}else{r.removed=r.removed||{};r.removed[id]=r.v[id];r.v[id]=0}if(r.done)delete r.done[k]}
+ if(t==='x'){const x=(r.extra||[]).find(e=>e.id===id);if(!x)return;if(what==='name')x.name=val||'Eigener Posten';else{const a=parseAmt(val);x.amount=a?a.v:0}}
+ else{if(what==='name'){r.lbl=r.lbl||{};const tl=colLabel(T(r),id);if(!val||val===tl)delete r.lbl[id];else r.lbl[id]=val;if(!Object.keys(r.lbl).length)delete r.lbl}else{if(!setColAmt(r,id,val))toast('Betrag nicht verstanden')}}}
+function removeLine(r,k){const t=k.slice(0,1),id=k.slice(2);if(t==='x'){r.extra=(r.extra||[]).filter(e=>e.id!==id);if(!r.extra.length){delete r.extra;delete r.xcol}}else{r.removed=r.removed||{};r.removed[id]=r.v[id];if(r.f[id]){r.removedF=r.removedF||{};r.removedF[id]=r.f[id];delete r.f[id]}r.v[id]=0}if(r.done)delete r.done[k]}
 function addLine(r,xcol,name){r.extra=r.extra||[];r.xcol=xcol;const id=Date.now().toString(36)+Math.random().toString(36).slice(2,5);r.extra.push({id,name,amount:0});return id}
 
 /* ---------- Neu / Bearbeiten ---------- */
@@ -250,7 +281,14 @@ function makeDraft(src,sub,date){const tpl=template(src,sub);if(!tpl)return null
    if(!/\[/.test(g)){r.v[c]=+Calc.val(tpl,c).toFixed(6);continue}
    g=g.replace(/\/\s*1\.19(?![\d])/g,'/(1+[$mwst])');if(taxSt.includes(c))g=g.replace(/\*\s*\d*\.\d+\s*$/,'*[$rate:'+src+':'+date.slice(0,4)+']');r.f[c]=g}
   else r.v[c]=typeof v==='number'?v:0}
- r.v.B=0;delete r.f.B;const d=S.settings.defaults[dkey(src,sub)]||{};for(const c in d)if(!r.f[c])r.v[c]=d[c];return r}
+ r.v.B=0;delete r.f.B;const d=S.settings.defaults[dkey(src,sub)]||{};for(const c in d)if(!r.f[c])r.v[c]=d[c];
+ rhApply(r,src,sub,date);return r}
+// Rhythmus auf einen neuen Eintrag anwenden: einmalig = 0, vierteljährlich = nur in fälligen Monaten, eigene wiederkehrende Posten ergänzen
+function rhApply(r,src,sub,date){const tb=T(r),R=(S.settings.rhythm||{})[dkey(src,sub)]||{},ym=String(date).slice(0,7);
+ for(const[c,l]of tb.cols){if(c==='A'||c==='B'||r.f[c]||typeof r.v[c]!=='number')continue;const ru=R['c:'+c],h=ru?ru.r:rhDef(l);
+  if(h==='e')r.v[c]=0;else if(h==='q')r.v[c]=qDue(ru.s,ym)?ru.a:0}
+ if(r.extra){r.extra=r.extra.filter(x=>!x.rule);if(!r.extra.length){delete r.extra;delete r.xcol}}
+ for(const[k,ru]of Object.entries(R))if(k.startsWith('x:')&&(ru.r==='m'||(ru.r==='q'&&qDue(ru.s,ym)))){r.extra=r.extra||[];r.xcol=netCol(r);r.extra.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),name:ru.n||'Posten',amount:ru.a||0,rule:k})}}
 function withDraft(fn){const d=U.form.rec;Calc.setDB({tables:S.tables,recs:{...S.recs,[d.id]:d},settings:S.settings});try{return fn(d)}finally{Calc.setDB(S)}}
 function initForm(){const src=U.form?.src||SRCS[0],subs=subsOf(src);const sub=U.form&&subs.includes(U.form.sub)?U.form.sub:subs[0];const date=U.form?.rec?.date||today();
  const old=U.form;const rec=makeDraft(src,sub,date);U.form={mode:'new',src,sub,rec,orig:rec&&JSON.parse(JSON.stringify(rec.f)),addBudget:true,replace:true};
@@ -279,7 +317,7 @@ function refreshForm(){const F=U.form,box=$('#fsteps');if(!F||!F.rec||!box)retur
   const rows=s.steps.map((x,i)=>{if(i===0&&x.col==='B')return'';const own=x.key.startsWith(d.id+':');const fx=own&&d.f[x.col];const isT=Calc.isTax(x.tlabel),isM=Calc.isMwst(x.tlabel);
    const sign=x.coef<0?'−':'+';
    if(!own)return`<div class="cell"><div class="l">${sign} ${esc(x.label)}</div><div class="r">${fm(Math.abs(x.amount))}</div></div>`;
-   return`<label class="cell ${isT?'tax':''}"><div class="l">${sign} ${esc(x.label)}${isT?'<span class="tag">Steuer · auto</span>':isM?'<span class="tag">auto</span>':''}</div><input data-col="${x.col}" inputmode="decimal" ${fx?`placeholder="${inpE(Math.abs(x.amount))}" value=""`:`value="${inpE(d.v[x.col])}"`}></label>`}).join('');
+   return`<label class="cell ${isT?'tax':''}"><div class="l">${sign} ${esc(x.label)}${isT?'<span class="tag">Steuer · auto</span>':isM?'<span class="tag">auto</span>':(!fx&&x.coef<0?rhTag(d,'c:'+x.col):'')}</div><input data-col="${x.col}" inputmode="decimal" ${fx?`placeholder="${inpE(Math.abs(x.amount))}" value=""`:`value="${inpE(d.v[x.col])}"`}></label>`}).join('');
   if(!keep||!box.querySelector(`[data-col="${keep}"]`)){box.innerHTML=rows+`<div class="cell tot"><div class="l">= Netto</div><div class="r" id="fnetv">${fm(s.net)}</div></div>`}
   else{box.querySelectorAll('input[data-col]').forEach(i=>{const c=i.dataset.col;if(d.f[c]){const st=s.steps.find(x=>x.col===c&&x.key.startsWith(d.id));if(st)i.placeholder=inpE(Math.abs(st.amount))}});$('#fnetv').textContent=fm(s.net)}
   $('#fnet').textContent='Steuer '+fm(s.tax)});}
@@ -344,12 +382,12 @@ function budget(){const AB=allBuds();if(!AB.length)return`<h1>Verteilung</h1><di
  <div class="foot hint">Ist = Monate, die schon gelaufen sind · Plan = geplante Monate (${bs.filter(x=>x.plan).map(x=>MON[mo(x)].slice(0,3)).join(', ')||'keine'}). Monate mit kaputter Formel zählen mit 0.</div>
  ${retR.length?`<div class="gh">Gehalt zurück bekommen ${y}</div><div class="group">${retR.map(x=>{const tb2=T(x);return`<div class="cell"><div class="l">${esc(x.label)}<small>${tb2.cols.filter(([c])=>c!=='A').map(([c,l])=>esc(l)+' '+fm(Calc.val(x,c))).join(' · ')}</small></div></div>`}).join('')}</div>`:''}`}
 function budEdit(r,tb,b){const {u}=budCols(tb);const cols=[['C',colLabel(tb,'C')],['D',colLabel(tb,'D')],...b].filter(([c])=>!(r.removed&&c in r.removed));
- const row=([c,l])=>r.f[c]?`<div class="cell erow"><span class="rm0"></span><input class="lname" data-bl="${c}" value="${esc(rl(r,c,l))}"><div class="r">${fm(Calc.val(r,c))}</div></div>`:`<div class="cell erow">${c==='D'?'<span class="rm0"></span>':`<button class="rm" data-act="brm" data-v="c:${c}" aria-label="Entfernen">−</button>`}<input class="lname" data-bl="${c}" value="${esc(rl(r,c,l))}"><input class="lamt" data-bcol="${c}" inputmode="decimal" value="${inpE(Calc.numv(r.v[c]))}"></div>`;
+ const row=([c,l])=>r.f[c]&&!isConstF(r.f[c])?`<div class="cell erow"><span class="rm0"></span><input class="lname" data-bl="${c}" value="${esc(rl(r,c,l))}"><div class="r">${fm(Calc.val(r,c))}</div></div>`:`<div class="cell erow">${c==='D'?'<span class="rm0"></span>':`<button class="rm" data-act="brm" data-v="c:${c}" aria-label="Entfernen">−</button>`}<input class="lname" data-bl="${c}" value="${esc(rl(r,c,l))}"><input class="lamt" data-bcol="${c}" inputmode="decimal" value="${amtIn(r,c)}"></div>`;
  return`<div class="navbar"><button data-act="bcancel">Abbrechen</button><b>${MON[mo(r)]} ${yr(r)}</b><button data-act="bsave" style="font-weight:600">Sichern</button></div>
  <div class="gh">Töpfe</div><div class="group">${cols.map(row).join('')}${(r.xcol===u?(r.extra||[]):[]).map(x=>`<div class="cell erow"><button class="rm" data-act="brm" data-v="x:${x.id}" aria-label="Entfernen">−</button><input class="lname" data-bxn="${x.id}" value="${esc(x.name)}"><input class="lamt" data-bxa="${x.id}" inputmode="decimal" value="${inpE(Calc.numv(x.amount))}"></div>`).join('')}</div>
  <div class="group" style="margin-top:8px"><button class="cell btn" data-act="badd">+ Topf hinzufügen</button></div>${removedBlock(r)}
  <div class="foot hint">„Übrig“ rechnet sich danach automatisch neu – mit derselben Formel wie in deiner Tabelle, eigene Töpfe werden zusätzlich abgezogen.</div>`}
-function applyBudInputs(r){view.querySelectorAll('[data-bcol]').forEach(i=>{const x=num(i.value);r.v[i.dataset.bcol]=isFinite(x)?x:0});view.querySelectorAll('[data-bl]').forEach(i=>applyLine(r,'c:'+i.dataset.bl,'name',i.value.trim()));
+function applyBudInputs(r){view.querySelectorAll('[data-bcol]').forEach(i=>{if(!setColAmt(r,i.dataset.bcol,i.value))toast('Betrag nicht verstanden: '+i.value)});view.querySelectorAll('[data-bl]').forEach(i=>applyLine(r,'c:'+i.dataset.bl,'name',i.value.trim()));
  view.querySelectorAll('[data-bxn]').forEach(i=>applyLine(r,'x:'+i.dataset.bxn,'name',i.value.trim()));view.querySelectorAll('[data-bxa]').forEach(i=>applyLine(r,'x:'+i.dataset.bxa,'amt',i.value))}
 /* ---------- Einstellungen ---------- */
 function settings(){const st=S.settings,n=all().length;const rk=Object.keys(st.rates).filter(k=>/^[A-Z]+:\d{4}$/.test(k)).sort((a,b)=>b.split(':')[1]-a.split(':')[1]||a.localeCompare(b));
@@ -393,7 +431,7 @@ async function importSetup(code){code=code.trim().replace(/^.*#setup=/,'');const
  if(S.setups.includes(fp)&&all().length){U.result={already:true};return}
  const o=JSON.parse(await inflate(unb64u(code)));const res=importObj(o);if(res){S.setups.push(fp);save();U.result=res;U.year=new Date().getFullYear()}}
 function download(name,text,type){const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}
-function exportBackup(){const o={app:'einkommen',v:5,kind:'backup',created:new Date().toISOString(),tables:S.tables,records:all(),settings:S.settings,setups:S.setups,archive:S.archive||{}};download('einkommen-backup-'+today()+'.json',JSON.stringify(o),'application/json');toast('Backup erstellt')}
+function exportBackup(){const o={app:'einkommen',v:7,kind:'backup',created:new Date().toISOString(),tables:S.tables,records:all(),settings:S.settings,setups:S.setups,archive:S.archive||{}};download('einkommen-backup-'+today()+'.json',JSON.stringify(o),'application/json');toast('Backup erstellt')}
 function exportCSV(){const n=x=>isFinite(x)?(+x.toFixed(2)).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2,useGrouping:false}):'';const q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
  const rows=[['Datum','Quelle','Art','Bezeichnung','Brutto','MwSt','Einkommensteuer','Abzüge','Netto','Status','Nach MwSt','Nach MwSt manuell','Nach MwSt berechnet']];
  for(const r of incs(null,true)){const s=sm(r);rows.push([unknownDay(r)?String(r.date).slice(0,7):r.date,SR(srcOf(r)).name,r.sub||'',r.label,n(s.gross),n(s.mwst),n(s.tax),n(s.ded),n(s.net),r.plan?'Plan':'Ist',...(()=>{const c=Calc.nachMwstCol(r);return c?[n(Calc.val(r,c)),Calc.isOv(r,c)?'ja':'nein',n(Calc.raw(r,c))]:['','','']})()].map((x,i)=>(i>=4&&i<=8)||i===10||i===12?x:q(x)))}
@@ -455,9 +493,10 @@ document.addEventListener('click',async e=>{const p=e.target.closest('[data-pin]
  case'ck':{const r=S.recs[U.check];r.done=r.done||{};if(r.done[v])delete r.done[v];else r.done[v]=true;r.chk=true;save();render();break}
  case'ckall':{const r=S.recs[U.check];r.done={};if(v==='1')checkItems(r).forEach(x=>r.done[x.key]=true);r.chk=true;save();render();break}
  case'wfedit':U.wfEdit=U.wfEdit===id?null:id;render();break;
- case'lrm':{const r=S.recs[U.detail];removeLine(r,v);save();toast('Posten entfernt');render();break}
+ case'lrm':{const r=S.recs[U.detail];const h=rhOf(r,v);if(h!=='e'&&!r.plan&&confirm('Diesen Posten auch in künftigen Monaten weglassen?\n\nOK = ab jetzt weglassen\nAbbrechen = nur in diesem Monat'))lineFuture(r,v,true);removeLine(r,v);save();toast('Posten entfernt');render();break}
+ case'rh':{const r=S.recs[U.detail];const[k,o]=[v.slice(0,v.lastIndexOf('|')),v.slice(v.lastIndexOf('|')+1)];view.querySelectorAll('[data-lamt]').forEach(i=>{if(i.dataset.lamt===k)applyLine(r,k,'amt',i.value)});setRhythm(r,k,o);save();toast('Rhythmus: '+RH[o]+' (gilt für neue Einträge)');render();break}
  case'ladd':{const r=S.recs[id];addLine(r,netCol(r),'Neuer Posten');save();render();const l=[...view.querySelectorAll('[data-lname^="x:"]')].pop();if(l){l.focus();l.select()}break}
- case'lrestore':{const[rid,c]=splitKey(v);const r=S.recs[rid];if(r&&r.removed&&c in r.removed){r.v[c]=r.removed[c];delete r.removed[c];if(!Object.keys(r.removed).length)delete r.removed}save();toast('Wiederhergestellt');render();break}
+ case'lrestore':{const[rid,c]=splitKey(v);const r=S.recs[rid];if(r&&r.removed&&c in r.removed){r.v[c]=r.removed[c];delete r.removed[c];if(!Object.keys(r.removed).length)delete r.removed;if(r.removedF&&r.removedF[c]){r.f[c]=r.removedF[c];delete r.removedF[c];if(!Object.keys(r.removedF).length)delete r.removedF}}save();toast('Wiederhergestellt');render();break}
  case'tedit':U.tedit=v;render();{const t=$('#tin');if(t){t.focus();t.setSelectionRange(t.value.length,t.value.length)}}break;case'tcancel':U.tedit=null;render();break;
  case'tsave':case'tdel':{const[k,rid,ix]=v.split(':');const r=S.recs[rid];const val=($('#tin')||{}).value||'';
   if(k==='v'){r.v[ix]=val.trim()}else{r.notes=r.notes||[];if(a.dataset.act==='tdel')r.notes.splice(+ix,1);else if(ix==='new'){if(val.trim())r.notes.push(val.trim())}else{if(val.trim())r.notes[+ix]=val.trim();else r.notes.splice(+ix,1)}}
@@ -477,7 +516,7 @@ view.addEventListener('input',e=>{const t=e.target;if(t.id==='fgross'||t.dataset
  if(t.dataset.rate){const x=num(t.value);if(isFinite(x)){S.settings.rates[t.dataset.rate]=x;save()}}
  if(t.dataset.def){const k=U.defs,x=num(t.value);S.settings.defaults[k]=S.settings.defaults[k]||{};if(isFinite(x))S.settings.defaults[k][t.dataset.def]=x;save()}});
 view.addEventListener('change',e=>{const t=e.target;
- if(t.dataset.lname||t.dataset.lamt){const r=S.recs[U.detail];if(!r)return;if(t.dataset.lname)applyLine(r,t.dataset.lname,'name',t.value.trim());else applyLine(r,t.dataset.lamt,'amt',t.value);save();const sel=t.dataset.lname?`[data-lamt="${t.dataset.lname}"]`:null;render();if(sel){const n=view.querySelector(sel);if(n)n.focus()}return}
+ if(t.dataset.lname||t.dataset.lamt){const r=S.recs[U.detail];if(!r)return;if(t.dataset.lname)applyLine(r,t.dataset.lname,'name',t.value.trim());else{applyLine(r,t.dataset.lamt,'amt',t.value);const k=t.dataset.lamt,h=rhOf(r,k);if(h!=='e'&&!r.plan&&confirm('Neuen Betrag auch für künftige Monate übernehmen?\n\nOK = ab jetzt\nAbbrechen = nur in diesem Monat'))lineFuture(r,k,false)}if(t.dataset.lname&&t.dataset.lname.startsWith('x:'))lineFuture(r,t.dataset.lname,false);save();const sel=t.dataset.lname?`[data-lamt="${t.dataset.lname}"]`:null;render();if(sel){const n=view.querySelector(sel);if(n)n.focus()}return}
  onFormChange(e)});
 // Wischen zum Löschen (iOS)
 let SW=null;view.addEventListener('touchstart',e=>{const w=e.target.closest('.swipe');document.querySelectorAll('.swipe.open').forEach(x=>{if(x!==w)x.classList.remove('open')});if(!w)return;SW={w,x:e.touches[0].clientX,y:e.touches[0].clientY,dx:0,lock:null}},{passive:true});
