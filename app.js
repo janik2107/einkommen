@@ -1,5 +1,5 @@
 'use strict';
-const VERSION='ek-v3',KEY='einkommen-v1';
+const VERSION='ek-v4',KEY='einkommen-v1';
 const $=s=>document.querySelector(s),view=$('#view');
 const EUR=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
 const fm=x=>isFinite(x)?EUR.format(Math.abs(x)<.005?0:x):'—';
@@ -13,7 +13,7 @@ const num=s=>{s=String(s??'').trim().replace(/[€\s]/g,'');if(!s)return NaN;if(
 const inpE=x=>isFinite(x)&&x!==''?(+x).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
 const inp=x=>isFinite(x)&&x!==''?(+(+x).toFixed(2)).toLocaleString('de-DE',{maximumFractionDigits:2,useGrouping:false}):'';
 const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
-function defaults(){return{v:3,archive:{},tables:{},recs:{},settings:{mwst:19,rates:{},defaults:{},theme:'auto'},pin:null,setups:[]}}
+function defaults(){return{v:4,archive:{},tables:{},recs:{},settings:{mwst:19,rates:{},defaults:{},theme:'auto'},pin:null,setups:[]}}
 function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.recs){s.settings=Object.assign(defaults().settings,s.settings);s.setups=s.setups||[];s.archive=s.archive||{};return s}}catch(e){}return defaults()}
 let S=load();Calc.setDB(S);
 let SUM=new Map();migrate(S,true);buildSrc();
@@ -21,7 +21,7 @@ function save(){localStorage.setItem(KEY,JSON.stringify(S));Calc.setDB(S);SUM=ne
 // Quellen (Arbeitgeber/Auftraggeber) kommen nur aus den eigenen Daten, nicht aus dem Code
 // v1/v2 → v3: Netto-Korrekturen aus v2 werden in „Nach MwSt.“ umgerechnet (gleiches Netto); Netto-Gesamt-Korrekturen entfallen;
 // Zeilen ohne Unterart im neuesten Jahr einer Quelle bekommen die Haupt-Unterart
-function migrate(st,persist,force){const from=st.v||1;if(from>=3&&!force)return;Calc.setDB(st);const recs=Object.values(st.recs);const T_=r=>st.tables[r.t]||{};
+function migrate(st,persist,force){const from=st.v||1;if(from>=4&&!force)return;Calc.setDB(st);const recs=Object.values(st.recs);const T_=r=>st.tables[r.t]||{};
  for(const r of recs){if(!r.ov)continue;const tb=T_(r);
   if(tb.kind==='inc'){const nc=r.net||tb.net;if(r.ov[nc]!=null){const target=+r.ov[nc];delete r.ov[nc];const c=Calc.nachMwstCol(r);let done=false;
     if(c){Calc.clear();const d0=Calc.raw(r,c);r.ov[c]=d0;Calc.clear();const n0=Calc.val(r,nc);r.ov[c]=d0+1000;Calc.clear();const n1=Calc.val(r,nc);const k=(n1-n0)/1000;
@@ -31,8 +31,11 @@ function migrate(st,persist,force){const from=st.v||1;if(from>=3&&!force)return;
   if(r.ov&&!Object.keys(r.ov).length)delete r.ov}
  const bySrc={};for(const r of recs){const tb=T_(r);if(tb.kind!=='inc'||!tb.source)continue;(bySrc[tb.source]=bySrc[tb.source]||[]).push(r)}
  for(const rs of Object.values(bySrc)){const y=Math.max(...rs.map(r=>+String(r.date).slice(0,4)));const ry=rs.filter(r=>+String(r.date).slice(0,4)===y).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
-  const main=(ry.find(r=>r.sub)||{}).sub;if(!main)continue;for(const r of ry)if(!r.sub){r.sub=main;if(r.label&&!r.label.toLowerCase().includes(main.toLowerCase()))r.label=main+' '+r.label}}
- st.v=3;Calc.setDB(S===st?st:S);if(persist)try{localStorage.setItem(KEY,JSON.stringify(st))}catch(e){}}
+  // nur Quellen, deren Unterarten VOR dem Namen stehen („<Unterart> <QUELLE> …“); Haupt-Unterart = erste im neuesten Jahr; gilt für alle Jahre
+  const pre=new Set(rs.filter(r=>r.sub&&String(r.label||'').toUpperCase().startsWith(r.sub.toUpperCase()+' ')).map(r=>r.sub));
+  const main=(ry.find(r=>r.sub&&pre.has(r.sub))||{}).sub;if(!main)continue;
+  for(const r of rs)if(!r.sub){r.sub=main;if(r.label&&!String(r.label).toUpperCase().startsWith(main.toUpperCase()+' '))r.label=main+' '+r.label}}
+ st.v=4;Calc.setDB(S===st?st:S);if(persist)try{localStorage.setItem(KEY,JSON.stringify(st))}catch(e){}}
 function buildSrc(){const g={};for(const r of Object.values(S.recs)){const t=S.tables[r.t];if(!t||t.kind!=='inc'||!t.source)continue;g[t.source]=(g[t.source]||0)+(Calc.numv(r.v&&r.v.B)||0)}
  SRCS=Object.keys(g).sort((a,b)=>g[b]-g[a]);SRC={};SRCS.forEach((k,i)=>SRC[k]={name:k.length>5&&k===k.toUpperCase()?k[0]+k.slice(1).toLowerCase():k,cls:'s'+(i%4),col:`var(--s${i%4})`,l:k[0].toUpperCase()})}
 const SR=k=>SRC[k]||NOSRC;
@@ -106,6 +109,8 @@ function home(){if(!years().length)return`<h1>Übersicht</h1>${resultPanel()}${e
  <div class="card"><div class="hero"><div class="lbl">Netto pro Monat</div></div>${svg}<div class="legend">${SRCS.map(k=>`<span><i class="dotc" style="background:${SR(k).col}"></i>${esc(SR(k).name)}</span>`).join('')}${a.plan.c?'<span><i class="dotc" style="background:url(#);border:1px dashed var(--sec)"></i>Plan</span>':''}</div></div>
  <div class="gh">${SRCS.map(k=>esc(SR(k).name)).join(' vs. ')}</div><div class="card" style="padding:12px 0 4px"><div style="padding:0 16px"><div class="split">${SV.map(([k,v])=>`<i style="width:${Math.max(v.n,0)/tn*100}%;background:${SR(k).col}"></i>`).join('')}</div></div>
  <div class="group ic" style="box-shadow:none;margin:0">${SV.map(([k,v])=>`<button class="cell" data-act="filter" data-v="${k}"><span class="av ${SR(k).cls}">${SR(k).l}</span><div class="l">${SR(k).name}<small>${v.c} Einträge · brutto ${fm(v.g)} · Steuer ${fm(v.t)}</small></div><div class="r"><b>${fm(v.n)}</b><br>${pct(v.n/tn*100)}</div></button>`).join('')}</div></div>
+ ${(()=>{const m={};incs(y).filter(r=>!r.plan).forEach(r=>{const k=srcOf(r)+'|'+(r.sub||'');const v=m[k]=m[k]||{src:srcOf(r),sub:r.sub||'',n:0,g:0,c:0};const q=sm(r);v.n+=q.net;v.g+=q.gross;v.c++});const L=Object.values(m).sort((a,b)=>SRCS.indexOf(a.src)-SRCS.indexOf(b.src)||b.n-a.n);
+  return L.length>SRCS.length?`<div class="gh">Nach Art</div><div class="group ic">${L.map(v=>`<div class="cell"><span class="av ${SR(v.src).cls}">${SR(v.src).l}</span><div class="l">${esc(v.sub?(v.sub.length>5?v.sub:v.sub+' · '+SR(v.src).name):SR(v.src).name)}<small>${v.c} Einträge · brutto ${fm(v.g)}</small></div><div class="r"><b>${fm(v.n)}</b></div></div>`).join('')}</div>`:''})()}
  <div class="gh">Vergleich mit ${y-1}</div>${hasPrev?`<div class="group">${cmp('Netto',a.ist.n,p.ist.n)}${cmp('Brutto',a.ist.g,p.ist.g)}${cmp('Einkommensteuer',a.ist.t,p.ist.t)}</div><div class="foot">${cur&&lastM<11?`Gleicher Zeitraum: Januar–${MON[lastM]}. `:''}${firstM>0?`${y-1} enthält Daten erst ab ${MON[firstM]}.`:''}</div>`:`<div class="group"><div class="cell"><div class="l" style="color:var(--sec)">Für ${y-1} gibt es keine Daten.</div></div></div>`}`}
 
 const filt=r=>U.filter==='all'||srcOf(r)===U.filter;
@@ -315,7 +320,7 @@ async function importSetup(code){code=code.trim().replace(/^.*#setup=/,'');const
  if(S.setups.includes(fp)&&all().length){U.result={already:true};return}
  const o=JSON.parse(await inflate(unb64u(code)));const res=importObj(o);if(res){S.setups.push(fp);save();U.result=res;const ys=years();U.year=ys.includes(new Date().getFullYear())?new Date().getFullYear():ys[ys.length-1]}}
 function download(name,text,type){const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}
-function exportBackup(){const o={app:'einkommen',v:3,kind:'backup',created:new Date().toISOString(),tables:S.tables,records:all(),settings:S.settings,setups:S.setups,archive:S.archive||{}};download('einkommen-backup-'+today()+'.json',JSON.stringify(o),'application/json');toast('Backup erstellt')}
+function exportBackup(){const o={app:'einkommen',v:4,kind:'backup',created:new Date().toISOString(),tables:S.tables,records:all(),settings:S.settings,setups:S.setups,archive:S.archive||{}};download('einkommen-backup-'+today()+'.json',JSON.stringify(o),'application/json');toast('Backup erstellt')}
 function exportCSV(){const n=x=>isFinite(x)?(+x.toFixed(2)).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2,useGrouping:false}):'';const q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
  const rows=[['Datum','Quelle','Art','Bezeichnung','Brutto','MwSt','Einkommensteuer','Abzüge','Netto','Status','Nach MwSt','Nach MwSt manuell','Nach MwSt berechnet']];
  for(const r of incs(null,true)){const s=sm(r);rows.push([unknownDay(r)?String(r.date).slice(0,7):r.date,SR(srcOf(r)).name,r.sub||'',r.label,n(s.gross),n(s.mwst),n(s.tax),n(s.ded),n(s.net),r.plan?'Plan':'Ist',...(()=>{const c=Calc.nachMwstCol(r);return c?[n(Calc.val(r,c)),Calc.isOv(r,c)?'ja':'nein',n(Calc.raw(r,c))]:['','','']})()].map((x,i)=>(i>=4&&i<=8)||i===10||i===12?x:q(x)))}
