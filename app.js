@@ -1,0 +1,318 @@
+'use strict';
+const VERSION='ek-v1',KEY='einkommen-v1';
+const $=s=>document.querySelector(s),view=$('#view');
+const EUR=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
+const fm=x=>isFinite(x)?EUR.format(Math.abs(x)<.005?0:x):'—';
+const fk=x=>Math.abs(x)>=1000?(x/1000).toLocaleString('de-DE',{maximumFractionDigits:Math.abs(x)>=10000?0:1})+'k':Math.round(x).toString();
+const pct=x=>isFinite(x)?x.toLocaleString('de-DE',{maximumFractionDigits:1})+' %':'—';
+const MON=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let SRC={},SRCS=[];const NOSRC={name:'?',cls:'s3',col:'var(--s3)',l:'?'};
+const PALETTE=['#007aff','#34c759','#ff9500','#af52de','#ff2d55','#5ac8fa','#ffcc00','#5856d6','#a2845e','#30b0c7','#ff3b30','#64d2ff','#8e8e93'];
+const num=s=>{s=String(s??'').trim().replace(/[€\s]/g,'');if(!s)return NaN;if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');else if((s.match(/\./g)||[]).length>1||/^\d{1,3}\.\d{3}$/.test(s))s=s.replace(/\./g,'');return +s};
+const inpE=x=>isFinite(x)&&x!==''?(+x).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
+const inp=x=>isFinite(x)&&x!==''?(+(+x).toFixed(2)).toLocaleString('de-DE',{maximumFractionDigits:2,useGrouping:false}):'';
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+function defaults(){return{v:1,tables:{},recs:{},settings:{mwst:19,rates:{},defaults:{},theme:'auto'},pin:null,setups:[]}}
+function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.recs){s.settings=Object.assign(defaults().settings,s.settings);s.setups=s.setups||[];return s}}catch(e){}return defaults()}
+let S=load();Calc.setDB(S);
+let SUM=new Map();buildSrc();
+function save(){localStorage.setItem(KEY,JSON.stringify(S));Calc.setDB(S);SUM=new Map();buildSrc()}
+// Quellen (Arbeitgeber/Auftraggeber) kommen nur aus den eigenen Daten, nicht aus dem Code
+function buildSrc(){const g={};for(const r of Object.values(S.recs)){const t=S.tables[r.t];if(!t||t.kind!=='inc'||!t.source)continue;g[t.source]=(g[t.source]||0)+(Calc.numv(r.v&&r.v.B)||0)}
+ SRCS=Object.keys(g).sort((a,b)=>g[b]-g[a]);SRC={};SRCS.forEach((k,i)=>SRC[k]={name:k.length>5&&k===k.toUpperCase()?k[0]+k.slice(1).toLowerCase():k,cls:'s'+(i%4),col:`var(--s${i%4})`,l:k[0].toUpperCase()})}
+const SR=k=>SRC[k]||NOSRC;
+const U={tab:'home',year:null,filter:'all',detail:null,form:null,bm:null,bedit:false,defs:null,result:null};
+
+/* ---------- Daten-Helfer ---------- */
+const T=r=>S.tables[r.t]||{};
+const isInc=r=>T(r).kind==='inc',isBud=r=>T(r).kind==='bud';
+const srcOf=r=>T(r).source;
+const netCol=r=>r.net||T(r).net;
+const sm=r=>{if(!SUM.has(r.id))SUM.set(r.id,Calc.incomeSummary(r));return SUM.get(r.id)};
+const yr=r=>+String(r.date||'').slice(0,4),mo=r=>+String(r.date||'').slice(5,7)-1;
+const all=()=>Object.values(S.recs);
+const byDate=(a,b)=>(a.date||'').localeCompare(b.date||'')||ordr(a)-ordr(b);
+const ordr=r=>+(r.id.split('-').pop())||0;
+const incs=(y,withEmpty)=>all().filter(r=>isInc(r)&&(y==null||yr(r)===y)&&(withEmpty||!r.empty)).sort(byDate);
+const buds=y=>all().filter(r=>isBud(r)&&yr(r)===y).sort(byDate);
+const years=()=>{const s=new Set(all().filter(r=>isInc(r)||isBud(r)).map(yr).filter(Boolean));return[...s].sort()};
+const unknownDay=r=>(r.notes||[]).some(n=>/Tag unbekannt/.test(n))||String(r.date).length<10;
+const title=r=>{const s=SR(srcOf(r)).name;return r.sub?r.sub+' · '+s:s};
+const dtext=r=>{const d=String(r.date);if(unknownDay(r))return MON[mo(r)]+' '+yr(r)+' · Tag offen';return d.slice(8,10)+'.'+d.slice(5,7)+'.'+d.slice(0,4)};
+const colLabel=(tb,c)=>((tb.cols||[]).find(x=>x[0]===c)||[,c])[1]||c;
+function agg(rs){const z=()=>({g:0,m:0,t:0,d:0,n:0,c:0});const o={ist:z(),plan:z(),src:{},months:[...Array(12)].map(()=>({}))};
+ for(const r of rs){const s=sm(r),k=r.plan?'plan':'ist',src=srcOf(r);
+  for(const[a,b]of[['g','gross'],['m','mwst'],['t','tax'],['d','ded'],['n','net']]){if(isFinite(s[b]))o[k][a]+=s[b]}o[k].c++;
+  if(!r.plan){o.src[src]=o.src[src]||z();o.src[src].g+=s.gross;o.src[src].n+=s.net;o.src[src].t+=s.tax;o.src[src].c++}
+  const mm=o.months[mo(r)];mm[src+k]=(mm[src+k]||0)+(isFinite(s.net)?s.net:0)}
+ return o}
+function deriveRates(){const R=S.settings.rates;for(const r of incs()){if(r.plan)continue;const k=srcOf(r)+':'+yr(r);const st=Calc.waterfall(r,netCol(r)).find(x=>Calc.isTax(x.label)&&r.f[x.col]);
+ const m=st&&/\*\s*(\d*\.\d+)\s*$/.exec(r.f[st.col]);if(m&&!(k in R)){R['_'+k]=+(m[1]*100).toFixed(2)}}
+ for(const k of Object.keys(R))if(k[0]==='_'){if(!(k.slice(1) in R))R[k.slice(1)]=R[k];delete R[k]}}
+function rateFor(src,y){const R=S.settings.rates;if(R[src+':'+y]!=null)return R[src+':'+y];const ks=Object.keys(R).filter(k=>k.startsWith(src+':')).sort();return ks.length?R[ks[ks.length-1]]:30}
+
+/* ---------- Rendering ---------- */
+function setTab(t){U.tab=t;U.detail=null;if(t!=='new'||(U.form&&U.form.mode==='edit'))U.form=null;U.bedit=false;U.defs=null;render();scrollTo(0,0)}
+function yearSegs(){const ys=years();if(!ys.length)return'';return`<div class="segs">${ys.map(y=>`<button class="seg ${y===U.year?'on':''}" data-act="year" data-v="${y}">${y}</button>`).join('')}</div>`}
+function render(){document.querySelectorAll('.tabbar button').forEach(b=>b.classList.toggle('on',b.dataset.tab===U.tab));
+ if(U.year==null){const ys=years(),cy=new Date().getFullYear();U.year=ys.includes(cy)?cy:ys[ys.length-1]||cy}
+ let h;if(U.detail)h=detail();else if(U.form&&U.form.mode==='edit')h=form();else h={home,list,new:form,budget,settings}[U.tab]();
+ view.innerHTML=`<div class="tab">${h}</div>`;if(U.tab==='new'||U.form)refreshForm()}
+function emptyHint(){return`<div class="card empty"><b>Noch keine Daten</b><p>Öffne den Einrichtungslink oder lade in den Einstellungen die Einrichtungsdatei.</p><button class="link" data-act="tab" data-v="settings">Zu den Einstellungen</button></div>`}
+function resultPanel(){const r=U.result;if(!r)return'';return`<div class="panel"><h3>${r.already?'Schon importiert':'Import fertig'}</h3>${r.already?'<p>Diese Daten sind bereits in der App. Es wurde nichts doppelt angelegt.</p>':`<p><b>${r.add}</b> Einträge übernommen${r.skip?`, ${r.skip} waren schon da`:''}.</p>${r.notes?`<p>${r.notes} Einträge haben einen Hinweis (z. B. Tag unbekannt, Tippfehler im Jahr korrigiert, kaputte Formel in Numbers) – du siehst ihn in der Detailansicht.</p>`:''}`}<button class="link" data-act="closeres">OK</button></div>`}
+
+function home(){if(!years().length)return`<h1>Übersicht</h1>${resultPanel()}${emptyHint()}`;
+ const y=U.year,a=agg(incs(y)),cur=y===new Date().getFullYear(),istM=incs(y).filter(r=>!r.plan).map(mo),lastM=istM.length?Math.max(...istM):11,p=agg(incs(y-1).filter(r=>!cur||mo(r)<=lastM)),hasPrev=incs(y-1).length>0;
+ const planM=[...new Set(incs(y).filter(r=>r.plan).map(mo))].sort((x,z)=>x-z);
+ const months=a.months;let max=0;const mt=m=>SRCS.reduce((x,k)=>x+(m[k+'ist']||0)+(m[k+'plan']||0),0);months.forEach(m=>{max=Math.max(max,mt(m))});max=max||1;
+ const W=340,H=170,L=30,B=148,bw=17,st=(W-L)/12;const sc=v=>v/max*(B-14);
+ const ticks=[0,.5,1].map(f=>f*max);
+ let svg=`<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Netto pro Monat">`+ticks.map(t=>`<line x1="${L}" x2="${W}" y1="${B-sc(t)}" y2="${B-sc(t)}" stroke="var(--sep)" stroke-width=".6"/><text x="${L-4}" y="${B-sc(t)+3}" text-anchor="end">${fk(t)}</text>`).join('');
+ svg+=`<defs><pattern id="hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="4" height="4" fill="var(--fill)"/><line x1="0" y1="0" x2="0" y2="4" stroke="var(--sec)" stroke-width="1.4" opacity=".5"/></pattern></defs>`;
+ months.forEach((m,i)=>{const x=L+i*st+(st-bw)/2;let yb=B;const seg=(v,fill,op)=>{if(!v||v<=0)return'';const hh=sc(v);yb-=hh;return`<rect x="${x}" y="${yb}" width="${bw}" height="${hh}" fill="${fill}" opacity="${op}"/>`};
+  const tot=mt(m);
+  svg+=SRCS.map(k=>seg(m[k+'ist'],SR(k).col,1)).join('')+seg(SRCS.reduce((x,k)=>x+(m[k+'plan']||0),0),'url(#hatch)',1);
+  if(tot>0)svg+=`<text class="vl" x="${x+bw/2}" y="${yb-3}" text-anchor="middle">${fk(tot)}</text>`;
+  svg+=`<text x="${x+bw/2}" y="${B+13}" text-anchor="middle">${MON[i][0]}</text>`});svg+='</svg>';
+ const SV=SRCS.map(k=>[k,a.src[k]||{g:0,n:0,c:0,t:0}]),tn=SV.reduce((x,[,v])=>x+v.n,0)||1;
+ const cmp=(lbl,c,v)=>{const d=c-v,pc=v?d/Math.abs(v)*100:NaN;return`<div class="cell"><div class="l">${lbl}<small>${y-1}: ${fm(v)}</small></div><div class="r"><b>${fm(c)}</b><br><span class="${d>=0?'up':'down'}">${d>=0?'+':'−'}${fm(Math.abs(d))}${isFinite(pc)?' ('+(d>=0?'+':'−')+pct(Math.abs(pc))+')':''}</span></div></div>`};
+ const firstM=incs(y-1).length?Math.min(...incs(y-1).map(mo)):0;
+ return`<h1>Übersicht</h1>${resultPanel()}${yearSegs()}
+ <div class="card hero"><div class="lbl">Netto ${y}</div><div class="big">${fm(a.ist.n)}</div><div class="sub">aus ${fm(a.ist.g)} brutto · ${pct(a.ist.g?a.ist.n/a.ist.g*100:NaN)} bleiben</div>${a.plan.c?`<div class="sub" style="margin-top:6px"><span class="badge" style="margin:0 4px 0 0">Plan</span>+ ${fm(a.plan.n)} netto geplant (${planM.map(i=>MON[i].slice(0,3)).join(', ')})</div>`:''}</div>
+ <div class="grid"><div class="tile"><span>Brutto</span><b>${fm(a.ist.g)}</b><small>${a.ist.c} Überweisungen</small></div><div class="tile"><span><i class="dotc" style="background:var(--red)"></i>Einkommensteuer</span><b>${fm(a.ist.t)}</b><small>${pct(a.ist.g?a.ist.t/a.ist.g*100:NaN)} vom Brutto</small></div>
+ <div class="tile"><span><i class="dotc" style="background:var(--orange)"></i>MwSt.</span><b>${fm(a.ist.m)}</b><small>geht ans Finanzamt</small></div><div class="tile"><span><i class="dotc" style="background:var(--sec)"></i>Abzüge</span><b>${fm(a.ist.d)}</b><small>Gehälter, Auto, Büro …</small></div></div>
+ <div class="card"><div class="hero"><div class="lbl">Netto pro Monat</div></div>${svg}<div class="legend">${SRCS.map(k=>`<span><i class="dotc" style="background:${SR(k).col}"></i>${esc(SR(k).name)}</span>`).join('')}${a.plan.c?'<span><i class="dotc" style="background:url(#);border:1px dashed var(--sec)"></i>Plan</span>':''}</div></div>
+ <div class="gh">${SRCS.map(k=>esc(SR(k).name)).join(' vs. ')}</div><div class="card" style="padding:12px 0 4px"><div style="padding:0 16px"><div class="split">${SV.map(([k,v])=>`<i style="width:${Math.max(v.n,0)/tn*100}%;background:${SR(k).col}"></i>`).join('')}</div></div>
+ <div class="group ic" style="box-shadow:none;margin:0">${SV.map(([k,v])=>`<button class="cell" data-act="filter" data-v="${k}"><span class="av ${SR(k).cls}">${SR(k).l}</span><div class="l">${SR(k).name}<small>${v.c} Einträge · brutto ${fm(v.g)} · Steuer ${fm(v.t)}</small></div><div class="r"><b>${fm(v.n)}</b><br>${pct(v.n/tn*100)}</div></button>`).join('')}</div></div>
+ <div class="gh">Vergleich mit ${y-1}</div>${hasPrev?`<div class="group">${cmp('Netto',a.ist.n,p.ist.n)}${cmp('Brutto',a.ist.g,p.ist.g)}${cmp('Einkommensteuer',a.ist.t,p.ist.t)}</div><div class="foot">${cur&&lastM<11?`Gleicher Zeitraum: Januar–${MON[lastM]}. `:''}${firstM>0?`${y-1} enthält Daten erst ab ${MON[firstM]}.`:''}</div>`:`<div class="group"><div class="cell"><div class="l" style="color:var(--sec)">Für ${y-1} gibt es keine Daten.</div></div></div>`}`}
+
+function list(){if(!years().length)return`<h1>Einnahmen</h1>${emptyHint()}`;
+ const rs=incs(U.year).filter(r=>U.filter==='all'||srcOf(r)===U.filter),hid=incs(U.year,true).filter(r=>r.empty&&(U.filter==='all'||srcOf(r)===U.filter)).length;const g={};rs.forEach(r=>(g[mo(r)]=g[mo(r)]||[]).push(r));
+ const ms=Object.keys(g).map(Number).sort((a,b)=>b-a);
+ return`<h1>Einnahmen</h1>${yearSegs()}<div class="chips">${[['all','Alle'],...SRCS.map(k=>[k,SR(k).name])].map(([k,l])=>`<button class="chip ${U.filter===k?'on':''}" data-act="filter" data-v="${k}">${l}</button>`).join('')}</div>
+ ${ms.length?ms.map(m=>{const list=g[m].slice().reverse();const n=list.filter(r=>!r.plan).reduce((s,r)=>s+(isFinite(sm(r).net)?sm(r).net:0),0),pn=list.filter(r=>r.plan).reduce((s,r)=>s+sm(r).net,0);
+  return`<section class="month"><div class="mh"><span>${MON[m]}</span><span>netto <b>${fm(n)}</b>${pn?' · Plan '+fm(pn):''}</span></div><div class="group ic">${list.map(r=>{const s=sm(r);return`<button class="cell ${r.plan?'plan':''}" data-act="open" data-id="${r.id}"><span class="av ${SR(srcOf(r)).cls}">${SR(srcOf(r)).l}</span><div class="l"><div class="one">${esc(r.sub&&r.sub.length>5?r.sub:title(r))}</div><small>${r.plan?'<span class="badge" style="margin:0 5px 0 0">Plan</span>':''}${unknownDay(r)?'Tag offen':String(r.date).slice(8,10)+'.'+String(r.date).slice(5,7)+'.'} · brutto ${fm(s.gross)}</small></div><div class="r"><b>${fm(s.net)}</b></div><span class="chev">›</span></button>`}).join('')}</div></section>`}).join(''):'<div class="card empty">Keine Einträge.</div>'}${hid?`<div class="foot">${hid} leere Platzhalter-Zeilen aus der Tabelle (Betrag 0) sind ausgeblendet.</div>`:''}`}
+
+function prettyF(r,f){const tb=T(r);return'= '+f.replace(/\[\$mwst\]/g,'MwSt').replace(/\[\$rate:[^\]]+\]/g,'Steuersatz').replace(/\[([^\]:]+):([A-Z]{1,2})\]/g,(m,id,c)=>{const o=S.recs[id];return o?`„${colLabel(T(o),c)}“ (${o.label||id})`:'?'}).replace(/\[([A-Z]{1,2})\]/g,(m,c)=>colLabel(tb,c)).replace(/\*/g,' × ').replace(/\//g,' ÷ ').replace(/-/g,' − ').replace(/\+/g,' + ').replace(/(\d)\.(\d)/g,'$1,$2')}
+function steps(r,s){let run=0,html='';const st=s.steps;
+ st.forEach((x,i)=>{run+=x.amount;const base=i===0;const lab=base?(x.col==='B'?'Überweisung (brutto)':esc(x.label)):esc(x.label);
+  const cls=base?'':(x.coef<0?'neg':'pos')+(Calc.isTax(x.label)?' tax':'');
+  html+=`<div class="cell ${cls}"><div class="l">${base?'':(x.coef<0?'− ':'+ ')}${lab}${Calc.isTax(x.label)?'<span class="tag">Steuer</span>':''}${Calc.isMwst(x.label)?`<span class="tag">${pct(s.gross?(-x.amount)/(s.gross+x.amount)*100:NaN)} auf netto</span>`:''}</div><div class="r">${fm(Math.abs(x.amount))}</div></div>`;
+  if(Calc.isMwst(x.label))html+=`<div class="cell subt"><div class="l">= Nach MwSt.</div><div class="r">${fm(run)}</div></div>`});
+ return html+`<div class="cell tot"><div class="l">= Netto</div><div class="r">${fm(s.net)}</div></div>`}
+function detail(){const r=S.recs[U.detail];if(!r){U.detail=null;return list()}const tb=T(r);
+ if(isBud(r)){U.detail=null;return budget()}
+ const s=sm(r);const texts=tb.cols.filter(([c])=>c!=='A'&&typeof r.v[c]==='string'&&r.v[c].trim()&&!r.f[c]);
+ const shown=new Set(s.steps.map(x=>x.key));
+ const other=tb.cols.filter(([c])=>c!=='A'&&!shown.has(r.id+':'+c)&&!(typeof r.v[c]==='string'&&!r.f[c])&&(r.f[c]||isFinite(Calc.val(r,c))));
+ return`<div class="navbar"><button data-act="back">‹ Zurück</button><button data-act="edit" data-id="${r.id}">Bearbeiten</button></div>
+ <div class="dhead"><span class="av ${SR(srcOf(r)).cls}" style="margin:0 auto;width:44px;height:44px;flex:none;border-radius:12px;font-size:20px">${SR(srcOf(r)).l}</span><h2>${esc(title(r))}${r.plan?'<span class="badge">Plan</span>':''}</h2><div class="t">${dtext(r)}</div><div class="big">${fm(s.net)}</div><div class="t">netto von ${fm(s.gross)} brutto</div></div>
+ ${(r.notes||[]).length?`<div class="warn"><b>Hinweis</b><ul>${r.notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul></div>`:''}
+ <div class="gh">Rechenweg wie in der Tabelle</div><div class="group wf">${steps(r,s)}</div>
+ <div class="grid" style="margin-top:12px"><div class="tile"><span>MwSt.</span><b>${fm(s.mwst)}</b></div><div class="tile"><span>Einkommensteuer</span><b>${fm(s.tax)}</b></div></div>
+ ${texts.map(([c,l])=>`<div class="gh">${esc(l)}</div><div class="group"><div class="cell"><div class="l">${esc(r.v[c])}</div></div></div>`).join('')}
+ ${other.length?`<details class="group" style="margin-top:14px"><summary>Weitere Spalten aus der Tabelle (${other.length})</summary>${other.map(([c,l])=>`<div class="cell"><div class="l">${esc(l)}${r.f[c]?`<small>${esc(r.f[c]==='#REF!'?'Formel kaputt (#REF!)':prettyF(r,r.f[c]))}</small>`:''}</div><div class="r">${fm(Calc.val(r,c))}</div></div>`).join('')}</details>`:''}
+ <div class="group" style="margin-top:22px"><button class="cell btn danger" data-act="del" data-id="${r.id}">Eintrag löschen</button></div>
+ <div class="foot">Quelle: ${esc(tb.name)}</div>`}
+
+/* ---------- Neu / Bearbeiten ---------- */
+function subsOf(src){const ys=incs().filter(r=>srcOf(r)===src);if(!ys.length)return[];const maxY=Math.max(...ys.map(yr));const subs=[...new Set(ys.filter(r=>yr(r)===maxY&&r.sub).map(r=>r.sub))];return subs.length?subs:['']}
+function template(src,sub){const rs=incs().filter(r=>srcOf(r)===src&&!r.plan&&!r.user);const main=subsOf(src)[0];const m=rs.filter(r=>r.sub===sub||(!r.sub&&sub===main));return(m.length?m:rs).sort(byDate).pop()}
+function dkey(src,sub){return src+'|'+(sub||'')}
+function makeDraft(src,sub,date){const tpl=template(src,sub);if(!tpl)return null;const tb=T(tpl);
+ const r={id:'u'+Date.now().toString(36),t:tpl.t,label:'',v:{},f:{},notes:[],date,sub,plan:false,user:true,tpl:tpl.id};
+ Calc.setDB(S);const net=netCol(tpl);const taxSt=Calc.waterfall(tpl,net).filter(x=>Calc.isTax(x.label)).map(x=>x.col);
+ for(const[c]of tb.cols){if(c==='A')continue;const f=tpl.f[c],v=tpl.v[c];if(typeof v==='string'&&!f)continue;
+  if(f&&f!=='#REF!'){let g=f.replace(/\[([^\]$:][^\]:]*):([A-Z]{1,2})\]/g,(m,id,cc)=>'('+(+Calc.val(S.recs[id],cc).toFixed(6))+')');
+   if(!/\[/.test(g)){r.v[c]=+Calc.val(tpl,c).toFixed(6);continue}
+   g=g.replace(/\/\s*1\.19(?![\d])/g,'/(1+[$mwst])');if(taxSt.includes(c))g=g.replace(/\*\s*\d*\.\d+\s*$/,'*[$rate:'+src+':'+date.slice(0,4)+']');r.f[c]=g}
+  else r.v[c]=typeof v==='number'?v:0}
+ r.v.B=0;delete r.f.B;const d=S.settings.defaults[dkey(src,sub)]||{};for(const c in d)if(!r.f[c])r.v[c]=d[c];return r}
+function withDraft(fn){const d=U.form.rec;Calc.setDB({tables:S.tables,recs:{...S.recs,[d.id]:d},settings:S.settings});try{return fn(d)}finally{Calc.setDB(S)}}
+function initForm(){const src=U.form?.src||SRCS[0],subs=subsOf(src);const sub=U.form&&subs.includes(U.form.sub)?U.form.sub:subs[0];const date=U.form?.rec?.date||today();
+ const old=U.form;const rec=makeDraft(src,sub,date);U.form={mode:'new',src,sub,rec,orig:rec&&JSON.parse(JSON.stringify(rec.f)),addBudget:true,replace:true};
+ if(old&&old.mode==='new'&&rec){if(old.rec&&old.rec.v.B)rec.v.B=old.rec.v.B;rec.plan=old.rec?.plan||false}}
+function planMatch(F){const d=F.rec;const c=incs().filter(r=>r.plan&&r.id!==d.id&&srcOf(r)===F.src&&String(r.date).slice(0,7)===d.date.slice(0,7));return c.find(r=>(r.sub||'')===(F.sub||''))||(F.sub===subsOf(F.src)[0]?c.find(r=>!r.sub):null)}
+function budFor(date){return all().find(r=>isBud(r)&&String(r.date).slice(0,7)===date.slice(0,7))}
+function form(){if(!years().length)return`<h1>Neue Einnahme</h1>${emptyHint()}`;
+ if(!U.form||(U.form.mode==='new'&&!U.form.rec))initForm();const F=U.form,d=F.rec;if(!d)return`<h1>Neue Einnahme</h1><div class="card empty">Für diese Quelle gibt es noch keine Vorlage.</div>`;
+ const edit=F.mode==='edit',tpl=S.recs[d.tpl];
+ const pm=edit?null:planMatch(F),bud=edit?null:budFor(d.date);
+ return`${edit?`<div class="navbar"><button data-act="cancel">Abbrechen</button><b>Bearbeiten</b><button data-act="save" style="font-weight:600">Sichern</button></div>`:'<h1>Neue Einnahme</h1>'}
+ ${edit?`<div class="info">${esc(title(d))} · ${esc(d.label||'')}</div>`:`<div class="segs">${SRCS.map(k=>`<button class="seg ${F.src===k?'on':''}" data-act="fsrc" data-v="${k}">${SR(k).name}</button>`).join('')}</div>
+ <div class="chips">${subsOf(F.src).map(s=>`<button class="chip ${F.sub===s?'on':''}" data-act="fsub" data-v="${esc(s)}">${esc(s||SR(F.src).name)}</button>`).join('')}</div>`}
+ <div class="group"><label class="cell"><span>Datum</span><input type="date" id="fdate" value="${esc(String(d.date).length===10?d.date:d.date+'-01')}"></label>
+ <label class="cell"><span>Überweisung (brutto)</span><input id="fgross" inputmode="decimal" placeholder="0,00 €" value="${d.v.B?inpE(d.v.B):''}" ${d.f.B?'disabled':''}></label>
+ <label class="cell"><span>Noch nicht erhalten (Plan)</span><input type="checkbox" id="fplan" ${d.plan?'checked':''} style="flex:0;width:22px;height:22px;accent-color:var(--accent)"></label></div>
+ <div class="gh"><span>Rechenweg</span><span id="fnet"></span></div><div class="group wf" id="fsteps"></div>
+ ${(()=>{const ex=extraCols(d);return ex.length?`<div class="gh">Für die Steuer (nicht vom Netto abgezogen)</div><div class="group">${ex.map(([c,l])=>`<label class="cell"><span>${esc(l)}</span><input data-col="${c}" inputmode="decimal" value="${inpE(d.v[c])}"></label>`).join('')}</div>`:''})()}
+ <div class="foot">${edit?'Felder ändern, „Sichern“ tippen. Leere Steuer-/MwSt.-Felder werden automatisch berechnet.':`Werte vorausgefüllt aus „${esc(tpl?tpl.label:'')}“ und deinen Standard-Abzügen. ESt-Satz ${pct(rateFor(F.src,+d.date.slice(0,4)))}, MwSt. ${pct(S.settings.mwst)} (Einstellungen). Jeder Wert ist änderbar.`}</div>
+ ${edit?'':`<div class="group" style="margin-top:16px">${pm?`<label class="cell"><div class="l">Plan-Eintrag ersetzen<small>„${esc(pm.label)}“ wird durch diesen Eintrag ersetzt</small></div><input type="checkbox" id="frepl" ${F.replace?'checked':''} style="flex:0;width:22px;height:22px;accent-color:var(--accent)"></label>`:''}
+ ${bud&&!(pm&&F.replace)?`<label class="cell"><div class="l">In Verteilung ${MON[mo(bud)]} ${yr(bud)} zählen<small>Netto wird zu „Netto Gesamt“ addiert</small></div><input type="checkbox" id="fbud" ${F.addBudget?'checked':''} style="flex:0;width:22px;height:22px;accent-color:var(--accent)"></label>`:''}</div>
+ <div style="margin-top:16px"><button class="primary" data-act="save">Einnahme sichern</button></div>`}`}
+function extraCols(d){return withDraft(()=>{const st=new Set(Calc.waterfall(d,netCol(d)).map(x=>x.col));const fs=Object.values(d.f).join(' ');return T(d).cols.filter(([c])=>c!=='A'&&c!=='B'&&!st.has(c)&&!d.f[c]&&typeof d.v[c]==='number'&&fs.includes('['+c+']'))})}
+function refreshForm(){const F=U.form,box=$('#fsteps');if(!F||!F.rec||!box)return;const d=F.rec;
+ withDraft(()=>{Calc.clear();const s=Calc.incomeSummary(d);const keep=document.activeElement&&document.activeElement.dataset.col;
+  const rows=s.steps.map((x,i)=>{if(i===0&&x.col==='B')return'';const own=x.key.startsWith(d.id+':');const fx=own&&d.f[x.col];const isT=Calc.isTax(x.label),isM=Calc.isMwst(x.label);
+   const sign=x.coef<0?'−':'+';
+   if(!own)return`<div class="cell"><div class="l">${sign} ${esc(x.label)}</div><div class="r">${fm(Math.abs(x.amount))}</div></div>`;
+   return`<label class="cell ${isT?'tax':''}"><div class="l">${sign} ${esc(x.label)}${isT?'<span class="tag">Steuer · auto</span>':isM?'<span class="tag">auto</span>':''}</div><input data-col="${x.col}" inputmode="decimal" ${fx?`placeholder="${inpE(Math.abs(x.amount))}" value=""`:`value="${inpE(d.v[x.col])}"`}></label>`}).join('');
+  if(!keep||!box.querySelector(`[data-col="${keep}"]`)){box.innerHTML=rows+`<div class="cell tot"><div class="l">= Netto</div><div class="r" id="fnetv">${fm(s.net)}</div></div>`}
+  else{box.querySelectorAll('input[data-col]').forEach(i=>{const c=i.dataset.col;if(d.f[c]){const st=s.steps.find(x=>x.col===c&&x.key.startsWith(d.id));if(st)i.placeholder=inpE(Math.abs(st.amount))}});$('#fnetv').textContent=fm(s.net)}
+  $('#fnet').textContent='Steuer '+fm(s.tax)});}
+function onFormInput(e){const F=U.form;if(!F||!F.rec)return;const d=F.rec,t=e.target;
+ if(t.id==='fgross'){d.v.B=num(t.value)||0;refreshForm();return}
+ if(t.dataset.col){const c=t.dataset.col,v=num(t.value);const orig=F.orig[c];
+  if(t.value.trim()===''){if(orig){d.f[c]=orig}else d.v[c]=0}else{if(orig)delete d.f[c];d.v[c]=isFinite(v)?v:0}refreshForm()}}
+function onFormChange(e){const F=U.form;if(!F||!F.rec)return;const d=F.rec,t=e.target;
+ if(t.id==='fdate'&&t.value){const old=d.date;d.date=t.value;if(F.mode==='new'&&old.slice(0,4)!==t.value.slice(0,4)){for(const c in d.f)d.f[c]=d.f[c].replace(/\[\$rate:([A-Z]+):\d+\]/,'[$rate:$1:'+t.value.slice(0,4)+']');for(const c in F.orig)F.orig[c]=F.orig[c].replace(/\[\$rate:([A-Z]+):\d+\]/,'[$rate:$1:'+t.value.slice(0,4)+']')}render()}
+ if(t.id==='fplan')d.plan=t.checked;if(t.id==='frepl'){F.replace=t.checked;render()}if(t.id==='fbud')F.addBudget=t.checked}
+function freeze(f){return f.replace(/\[\$mwst\]/g,'('+S.settings.mwst/100+')').replace(/\[\$rate:([A-Z]+):(\d+)\]/g,(m,s,y)=>'('+rateFor(s,+y)/100+')')}
+function saveForm(){const F=U.form,d=F.rec;if(!(d.v.B>0)&&!d.f.B&&!(F.mode==='edit')){toast('Bitte Brutto-Betrag eingeben');return}
+ for(const c in d.f)d.f[c]=freeze(d.f[c]);
+ if(F.mode==='edit'){S.recs[d.id]=d;save();U.form=null;U.detail=d.id;toast('Gesichert');render();return}
+ const ds=d.date.slice(8,10)+'.'+d.date.slice(5,7)+'.'+d.date.slice(0,4);
+ const tl=(S.recs[d.tpl]&&S.recs[d.tpl].label)||F.src;d.label=/\d{1,2}\.\d{4}/.test(tl)?tl.replace(/(\d{1,2}|XX|0x)?\.?\d{1,2}\.\d{4,5}/,ds):tl+' '+ds;if(F.sub&&!d.label.toLowerCase().includes(F.sub.toLowerCase().slice(0,6)))d.label=F.sub+' '+d.label;
+ d.notes=['In der App erfasst'];const pm=planMatch(F);
+ if(pm&&F.replace){d.id=pm.id;d.notes.push('Ersetzt den Plan-Eintrag „'+pm.label+'“');S.recs[pm.id]=d}
+ else{S.recs[d.id]=d;const bud=budFor(d.date);if(bud&&F.addBudget){const ref=`[${d.id}:${netCol(d)}]`;if(bud.f.B&&bud.f.B!=='#REF!')bud.f.B+='+'+ref;else if(!bud.f.B)bud.f.B=(Calc.numv(bud.v.B)?Calc.numv(bud.v.B)+'+':'')+ref}}
+ save();const id=d.id;U.form=null;U.tab='list';U.year=yr(d);U.detail=id;toast('Einnahme gesichert');render();scrollTo(0,0)}
+
+/* ---------- Verteilung ---------- */
+function budCols(tb){const cols=tb.cols||[];const u=cols.find(([c,l])=>/^(Übrig|Variante 1\b.*)$/i.test(l.trim()));
+ const b=cols.filter(([c,l])=>c>='F'&&c.length===1&&!/Bemerkung|Variante|Übrig/i.test(l));return{u:u&&u[0],b,note:(cols.find(([c,l])=>/Bemerkung/i.test(l))||[])[0]}}
+function linRefs(r,c){const f=r.f[c];if(!f||f==='#REF!')return[];return[...f.matchAll(/\[([^\]$:][^\]:]*):([A-Z]{1,2})\]/g)].map(m=>({id:m[1],c:m[2]}))}
+function donut(segs){const tot=segs.reduce((s,x)=>s+x.v,0)||1;const R=56,C=2*Math.PI*R;let off=0;
+ return`<svg class="donut" viewBox="0 0 150 150" width="150" height="150"><circle cx="75" cy="75" r="${R}" fill="none" stroke="var(--fill)" stroke-width="22"/>`+segs.map(x=>{const l=x.v/tot*C;const s=`<circle cx="75" cy="75" r="${R}" fill="none" stroke="${x.col}" stroke-width="22" stroke-dasharray="${Math.max(l-1.2,0.01)} ${C}" stroke-dashoffset="${-off}" transform="rotate(-90 75 75)"/>`;off+=l;return s}).join('')+'</svg>'}
+function budget(){const y=U.year,bs=buds(y);if(!bs.length)return`<h1>Verteilung</h1>${yearSegs()}<div class="card empty">Für ${y} gibt es keine Verteilung.</div>`;
+ let r=bs.find(x=>x.id===U.bm);if(!r){const ist=bs.filter(x=>!x.plan);const cm=today().slice(0,7);r=ist.filter(x=>String(x.date).slice(0,7)<=cm).pop()||ist.pop()||bs[0];U.bm=r.id}
+ const tb=T(r),{u,b,note}=budCols(tb),i=bs.indexOf(r);const B=Calc.val(r,'B'),Cg=Calc.val(r,'C'),D=Calc.val(r,'D'),E=Calc.val(r,'E');
+ const ub=u?Calc.val(r,u):NaN;const fixed=u?Calc.waterfall(r,u,false).filter(x=>x.key==='#').reduce((s,x)=>s-x.amount,0):0;
+ const segs=[];if(Cg>0)segs.push({k:'C',n:colLabel(tb,'C'),v:Cg});b.forEach(([c,l])=>{const v=Calc.val(r,c);if(v>0)segs.push({k:c,n:l,v})});if(fixed>0.005)segs.push({k:'#',n:'Feste Beträge (in der Übrig-Formel)',v:fixed});if(ub>0)segs.push({k:u,n:'Übrig',v:ub});
+ segs.forEach((s,j)=>s.col=s.k===u?'var(--green)':s.k==='C'?'var(--accent)':PALETTE[(j+2)%PALETTE.length]);const st=segs.reduce((s,x)=>s+x.v,0);
+ const refs=linRefs(r,'B').map(x=>S.recs[x.id]).filter(x=>x&&!x.empty);const incM=incs(y).filter(x=>mo(x)===mo(r)&&!x.plan).reduce((s,x)=>s+sm(x).net,0);
+ if(U.bedit)return budEdit(r,tb,b);
+ // Plan vs Ist
+ const rowsPI=[['C',colLabel(tb,'C')],...b];if(u)rowsPI.push([u,'Übrig']);const sumBy=(c,pl)=>bs.filter(x=>!!x.plan===pl).reduce((s,x)=>{const v=Calc.val(x,c);return s+(isFinite(v)?v:0)},0);const anyPlan=bs.some(x=>x.plan);
+ const retR=all().filter(x=>T(x).kind==='ret'&&yr(x)===y).sort(byDate);
+ return`<h1>Verteilung</h1>${yearSegs()}
+ <div class="pm"><button data-act="bm" data-v="${i-1}" ${i<=0?'disabled style="opacity:.3"':''}>‹</button><span>${MON[mo(r)]} ${y}${r.plan?'<span class="badge">Plan</span>':''}</span><button data-act="bm" data-v="${i+1}" ${i>=bs.length-1?'disabled style="opacity:.3"':''}>›</button></div>
+ ${isFinite(B)?'':`<div class="warn"><b>Netto Gesamt fehlt.</b> In der Numbers-Tabelle ist die Formel für diesen Monat kaputt (#REF!). Laut deinen Einnahmen waren es in ${MON[mo(r)]} netto ${fm(incM)}.</div>`}
+ <div class="card"><div class="hero"><div class="lbl">Netto Gesamt</div><div class="big">${fm(B)}</div><div class="sub">${refs.length?`aus ${refs.length} Einnahme${refs.length>1?'n':''}`:''}${D?` · + ${fm(D)} übrige MwSt.`:''}</div></div>
+ ${segs.length?`<div class="donutwrap" style="margin-top:14px">${donut(segs)}<div><div class="lbl" style="color:var(--sec);font-size:13px;font-weight:600">ÜBRIG</div><div style="font-size:26px;font-weight:700" class="num ${ub<0?'down':'up'}">${fm(ub)}</div><div class="sub" style="color:var(--sec);font-size:14px">${isFinite(B)&&B?pct(ub/B*100)+' vom Netto':''}</div></div></div>`:''}</div>
+ ${E&&isFinite(E)?`<div class="info">Gehalt fehlend: ${fm(E)} – so viel fehlt noch bis zum Gehalt von ${fm(Cg)}.</div>`:''}
+ <div class="gh"><span>Aufteilung</span><button class="link" data-act="bedit" style="font-size:13px;padding:0;text-transform:none">Bearbeiten</button></div><div class="group">${segs.map(s=>`<div class="cell"><div class="l"><i class="dotc" style="background:${s.col};margin-right:8px"></i>${esc(s.n)}</div><div class="r"><b>${fm(s.v)}</b> · ${pct(st?s.v/st*100:NaN)}</div></div>`).join('')||'<div class="cell"><div class="l" style="color:var(--sec)">Nichts verteilt.</div></div>'}${ub<0?`<div class="cell"><div class="l down">Übrig (negativ)</div><div class="r down">${fm(ub)}</div></div>`:''}</div>
+ ${note&&r.v[note]&&String(r.v[note]).trim()&&r.v[note]!=='X'?`<div class="foot">Bemerkung: ${esc(r.v[note])}</div>`:''}
+ ${refs.length?`<div class="gh">Netto kommt aus</div><div class="group ic">${refs.map(x=>`<button class="cell" data-act="open" data-id="${x.id}"><span class="av ${SR(srcOf(x)).cls}">${SR(srcOf(x)).l}</span><div class="l">${esc(title(x))}${x.plan?'<span class="badge">Plan</span>':''}<small>${dtext(x)}</small></div><div class="r"><b>${fm(sm(x).net)}</b></div><span class="chev">›</span></button>`).join('')}</div>`:''}
+ <div class="gh">${anyPlan?'Plan vs. Ist':'Summe'} ${y}</div><div class="group"><div class="pvi h"><span>Topf</span><span>Ist</span><span>${anyPlan?'Plan':''}</span></div>
+ <div class="pvi"><span><b>Netto Gesamt</b></span><span><b>${fm(sumBy('B',false))}</b></span><span>${anyPlan?fm(sumBy('B',true)):''}</span></div>
+ ${rowsPI.map(([c,l])=>`<div class="pvi"><span>${esc(c===u?'Übrig':l)}</span><span>${fm(sumBy(c,false))}</span><span>${anyPlan?fm(sumBy(c,true)):''}</span></div>`).join('')}</div>
+ <div class="foot">Ist = Monate, die schon gelaufen sind · Plan = geplante Monate (${bs.filter(x=>x.plan).map(x=>MON[mo(x)].slice(0,3)).join(', ')||'keine'}). Monate mit kaputter Formel zählen mit 0.</div>
+ ${retR.length?`<div class="gh">Gehalt zurück bekommen ${y}</div><div class="group">${retR.map(x=>{const tb2=T(x);return`<div class="cell"><div class="l">${esc(x.label)}<small>${tb2.cols.filter(([c])=>c!=='A').map(([c,l])=>esc(l)+' '+fm(Calc.val(x,c))).join(' · ')}</small></div></div>`}).join('')}</div>`:''}`}
+function budEdit(r,tb,b){const cols=[['C',colLabel(tb,'C')],['D',colLabel(tb,'D')],...b];
+ return`<div class="navbar"><button data-act="bcancel">Abbrechen</button><b>${MON[mo(r)]} ${yr(r)}</b><button data-act="bsave" style="font-weight:600">Sichern</button></div>
+ <div class="gh">Beträge</div><div class="group">${cols.map(([c,l])=>r.f[c]?`<div class="cell"><div class="l">${esc(l)}<small>berechnet</small></div><div class="r">${fm(Calc.val(r,c))}</div></div>`:`<label class="cell"><span>${esc(l)}</span><input data-bcol="${c}" inputmode="decimal" value="${inpE(Calc.numv(r.v[c]))}"></label>`).join('')}</div>
+ <div class="foot">„Übrig“ rechnet sich danach automatisch neu – mit derselben Formel wie in deiner Tabelle.</div>`}
+
+/* ---------- Einstellungen ---------- */
+function settings(){const st=S.settings,n=all().length;const rk=Object.keys(st.rates).filter(k=>/^[A-Z]+:\d{4}$/.test(k)).sort((a,b)=>b.split(':')[1]-a.split(':')[1]||a.localeCompare(b));
+ if(U.defs)return defsView();
+ const kinds=[];for(const s of SRCS)for(const sub of subsOf(s))kinds.push([s,sub]);
+ return`<h1>Einstellungen</h1>${resultPanel()}
+ <div class="gh">Darstellung</div><div class="segs">${[['auto','Automatisch'],['light','Hell'],['dark','Dunkel']].map(([k,l])=>`<button class="seg ${st.theme===k?'on':''}" data-act="theme" data-v="${k}">${l}</button>`).join('')}</div>
+ <div class="gh">Steuern für neue Einträge</div><div class="group"><label class="cell"><span>MwSt.</span><input data-set="mwst" inputmode="decimal" value="${inp(st.mwst)}" style="flex:0 0 70px"><span class="r">%</span></label>
+ ${rk.map(k=>{const[s,y]=k.split(':');return`<label class="cell"><span>ESt-Satz ${SR(s).name||s} ${y}</span><input data-rate="${k}" inputmode="decimal" value="${inp(st.rates[k])}" style="flex:0 0 70px"><span class="r">%</span></label>`}).join('')}</div>
+ <div class="foot">Gilt nur für neue Einträge. Alte Einträge behalten genau die Werte aus deiner Tabelle.</div>
+ <div class="gh">Standard-Abzüge</div><div class="group">${kinds.map(([s,sub])=>`<button class="cell" data-act="defs" data-v="${s}|${esc(sub)}"><div class="l">${esc(sub?sub+' · ':'')}${SR(s).name}<small>${Object.keys(st.defaults[dkey(s,sub)]||{}).length?'eigene Werte':'wie letzter Eintrag'}</small></div><span class="chev">›</span></button>`).join('')}</div>
+ <div class="gh">Daten</div><div class="group"><div class="cell"><div class="l">Gespeichert auf diesem Gerät</div><div class="r">${n} Zeilen</div></div>
+ <button class="cell btn" data-act="export">Backup sichern (JSON)</button><button class="cell btn" data-act="import">Backup oder Einrichtungsdatei laden</button><button class="cell btn" data-act="paste">Einrichtungslink einfügen</button><button class="cell btn" data-act="csv">Als CSV exportieren</button></div>
+ <div class="foot">Deine Daten liegen nur hier auf dem Gerät, nicht im Internet. Mach ab und zu ein Backup.</div>
+ <div class="gh">Sicherheit</div><div class="group">${S.pin?`<button class="cell btn" data-act="pinset">PIN ändern</button><button class="cell btn danger" data-act="pinoff">PIN-Sperre ausschalten</button>`:`<button class="cell btn" data-act="pinset">PIN-Sperre einschalten</button>`}</div>
+ <div class="foot">Die 4-stellige PIN schützt vor neugierigen Blicken. Sie verschlüsselt die Daten nicht.</div>
+ <div class="group" style="margin-top:22px"><button class="cell btn danger" data-act="wipe">Alle Daten löschen</button></div><div class="foot" style="text-align:center;margin-top:14px">Einkommen · Version ${VERSION}</div>`}
+function defsView(){const[s,sub]=U.defs.split('|');const d=makeDraft(s,sub,today());if(!d)return'';const tb=T(d);
+ const cur=S.settings.defaults[dkey(s,sub)]||{};const tpl=S.recs[d.tpl];
+ const cols=Calc.waterfall(Object.assign(d,{v:{...d.v,B:1000}}),netCol(d)).length?null:null;
+ Calc.setDB({tables:S.tables,recs:{...S.recs,[d.id]:d},settings:S.settings});const w=Calc.waterfall(d,netCol(d));Calc.setDB(S);
+ const ded=w.filter(x=>x.key.startsWith(d.id+':')&&x.col!=='B'&&!d.f[x.col]);
+ return`<div class="navbar"><button data-act="defsback">‹ Einstellungen</button><b>${esc(sub?sub+' · ':'')}${SR(s).name}</b><span style="width:60px"></span></div>
+ <div class="gh">Abzüge pro neuem Eintrag</div><div class="group">${ded.map(x=>`<label class="cell"><span>${esc(x.label)}</span><input data-def="${x.col}" inputmode="decimal" value="${inpE(cur[x.col]??tpl.v[x.col])}"></label>`).join('')}</div>
+ <div class="foot">Vorgabe ist der letzte Eintrag („${esc(tpl.label)}“). Steuern und MwSt. rechnet die App selbst.</div>
+ <div class="group" style="margin-top:18px"><button class="cell btn" data-act="defsreset">Auf letzten Eintrag zurücksetzen</button></div>`}
+
+/* ---------- Import / Export ---------- */
+function b64u(bytes){let s='';for(let i=0;i<bytes.length;i+=0x8000)s+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+function unb64u(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const b=atob(s),u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u}
+async function inflate(bytes){const ds=new DecompressionStream('deflate-raw');return await new Response(new Blob([bytes]).stream().pipeThrough(ds)).text()}
+async function sha(s){const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return[...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,'0')).join('')}
+function importObj(o){if(!o||o.app!=='einkommen'||!Array.isArray(o.records))throw new Error('Das ist keine Einkommen-Datei.');
+ if(o.kind==='backup'){if(!confirm('Backup laden? Das ersetzt alle Daten, die gerade in der App sind.'))return null;
+  S.tables=o.tables||{};S.recs={};o.records.forEach(r=>S.recs[r.id]=r);S.settings=Object.assign(defaults().settings,o.settings||{});S.setups=o.setups||S.setups;save();return{add:o.records.length,skip:0,notes:0}}
+ let add=0,skip=0,notes=0;for(const[k,t]of Object.entries(o.tables||{}))if(!S.tables[k])S.tables[k]=t;
+ for(const r of o.records){if(S.recs[r.id]){skip++;continue}S.recs[r.id]=r;add++;if((r.notes||[]).length)notes++}
+ Calc.setDB(S);SUM=new Map();deriveRates();save();return{add,skip,notes}}
+async function importSetup(code){code=code.trim().replace(/^.*#setup=/,'');const fp=(await sha(code)).slice(0,24);
+ if(S.setups.includes(fp)&&all().length){U.result={already:true};return}
+ const o=JSON.parse(await inflate(unb64u(code)));const res=importObj(o);if(res){S.setups.push(fp);save();U.result=res;const ys=years();U.year=ys.includes(new Date().getFullYear())?new Date().getFullYear():ys[ys.length-1]}}
+function download(name,text,type){const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}
+function exportBackup(){const o={app:'einkommen',v:1,kind:'backup',created:new Date().toISOString(),tables:S.tables,records:all(),settings:S.settings,setups:S.setups};download('einkommen-backup-'+today()+'.json',JSON.stringify(o),'application/json');toast('Backup erstellt')}
+function exportCSV(){const n=x=>isFinite(x)?(+x.toFixed(2)).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2,useGrouping:false}):'';const q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
+ const rows=[['Datum','Quelle','Art','Bezeichnung','Brutto','MwSt','Einkommensteuer','Abzüge','Netto','Status']];
+ for(const r of incs(null,true)){const s=sm(r);rows.push([unknownDay(r)?String(r.date).slice(0,7):r.date,SR(srcOf(r)).name,r.sub||'',r.label,n(s.gross),n(s.mwst),n(s.tax),n(s.ded),n(s.net),r.plan?'Plan':'Ist'].map((x,i)=>i>=4&&i<=8?x:q(x)))}
+ download('einkommen-'+today()+'.csv','\ufeff'+rows.map(r=>r.join(';')).join('\r\n'),'text/csv');toast('CSV erstellt')}
+
+/* ---------- PIN ---------- */
+let pinBuf='',pinMode=null,pinFirst='';
+function showLock(mode){pinMode=mode;pinBuf='';pinFirst='';const L=$('#lock');L.hidden=false;drawLock()}
+function drawLock(msg){const L=$('#lock');const t=pinMode==='unlock'?'PIN eingeben':pinFirst?'PIN wiederholen':'Neue PIN wählen';
+ L.innerHTML=`<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg><h2>${t}</h2><div class="pdots" id="pdots">${[0,1,2,3].map(i=>`<i class="${i<pinBuf.length?'f':''}"></i>`).join('')}</div><div style="min-height:18px;color:var(--red);font-size:14px">${msg||''}</div>
+ <div class="pad">${[1,2,3,4,5,6,7,8,9].map(d=>`<button data-pin="${d}">${d}</button>`).join('')}<button class="x" data-pin="${pinMode==='unlock'?'':'x'}">${pinMode==='unlock'?'':'Abbrechen'}</button><button data-pin="0">0</button><button class="x" data-pin="b">⌫</button></div>`}
+async function pinKey(k){if(k==='x'){$('#lock').hidden=true;return}if(k==='b'){pinBuf=pinBuf.slice(0,-1);drawLock();return}if(k===''||pinBuf.length>=4)return;pinBuf+=k;drawLock();if(pinBuf.length<4)return;
+ const p=pinBuf;await new Promise(r=>setTimeout(r,120));
+ if(pinMode==='unlock'){const ok=S.pin&&await sha(S.pin.salt+p)===S.pin.hash;if(ok){$('#lock').hidden=true;$('#lock').innerHTML='';hiddenAt=0}else{pinBuf='';drawLock('Falsche PIN');$('#pdots').classList.add('shake')}return}
+ if(!pinFirst){pinFirst=p;pinBuf='';drawLock();return}
+ if(pinFirst!==p){pinFirst='';pinBuf='';drawLock('Stimmt nicht überein – bitte neu');return}
+ const salt=[...crypto.getRandomValues(new Uint8Array(12))].map(b=>b.toString(16).padStart(2,'0')).join('');S.pin={salt,hash:await sha(salt+p)};save();$('#lock').hidden=true;toast('PIN-Sperre an');render()}
+let hiddenAt=0;document.addEventListener('visibilitychange',()=>{if(document.hidden)hiddenAt=Date.now();else if(S.pin&&hiddenAt&&Date.now()-hiddenAt>60000&&$('#lock').hidden)showLock('unlock')});
+
+/* ---------- Events ---------- */
+function toast(t){const e=$('#toast');e.textContent=t;e.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>e.hidden=true,2400)}
+document.addEventListener('click',async e=>{const p=e.target.closest('[data-pin]');if(p){pinKey(p.dataset.pin);return}
+ const tb=e.target.closest('.tabbar button');if(tb){setTab(tb.dataset.tab);return}
+ const a=e.target.closest('[data-act]');if(!a)return;const v=a.dataset.v,id=a.dataset.id;
+ switch(a.dataset.act){
+ case'tab':setTab(v);break;
+ case'year':U.year=+v;U.bm=null;render();break;
+ case'filter':U.filter=v;if(U.tab!=='list'){U.tab='list'}render();break;
+ case'open':U.detail=id;render();scrollTo(0,0);break;
+ case'back':U.detail=null;render();break;
+ case'edit':{const r=JSON.parse(JSON.stringify(S.recs[id]));U.form={mode:'edit',src:srcOf(r),sub:r.sub,rec:r,orig:JSON.parse(JSON.stringify(r.f))};U.detail=null;render();scrollTo(0,0);break}
+ case'cancel':U.detail=U.form?.rec?.id;U.form=null;render();break;
+ case'save':saveForm();break;
+ case'fsrc':{const date=U.form.rec?.date||today(),B=U.form.rec?.v?.B,pl=U.form.rec?.plan;U.form={mode:'new',src:v,rec:{date,v:{B},plan:pl}};initForm();U.form.rec&&(U.form.rec.date=date);render();break}
+ case'fsub':{const date=U.form.rec.date,B=U.form.rec.v.B,pl=U.form.rec.plan;U.form.sub=v;initForm();U.form.rec.date=date;if(B)U.form.rec.v.B=B;U.form.rec.plan=pl;render();break}
+ case'del':if(confirm('Diesen Eintrag wirklich löschen?')){delete S.recs[id];save();U.detail=null;toast('Gelöscht');render()}break;
+ case'bm':{const bs=buds(U.year);const r=bs[+v];if(r){U.bm=r.id;render()}break}
+ case'bedit':U.bedit=true;render();break;case'bcancel':U.bedit=false;render();break;
+ case'bsave':{const r=S.recs[U.bm];view.querySelectorAll('[data-bcol]').forEach(i=>{const x=num(i.value);r.v[i.dataset.bcol]=isFinite(x)?x:0});save();U.bedit=false;toast('Gesichert');render();break}
+ case'theme':S.settings.theme=v;save();applyTheme();render();break;
+ case'defs':U.defs=v;render();scrollTo(0,0);break;case'defsback':U.defs=null;render();break;
+ case'defsreset':delete S.settings.defaults[U.defs];save();render();toast('Zurückgesetzt');break;
+ case'export':exportBackup();break;case'csv':exportCSV();break;case'import':$('#file').click();break;
+ case'paste':{const t=prompt('Einrichtungslink hier einfügen:');if(t)try{await importSetup(t);U.tab='home';render()}catch(err){alert('Der Link konnte nicht gelesen werden: '+err.message)}break}
+ case'closeres':U.result=null;render();break;
+ case'pinset':showLock('set');break;case'pinoff':if(confirm('PIN-Sperre ausschalten?')){S.pin=null;save();render()}break;
+ case'wipe':if(confirm('Wirklich ALLE Daten auf diesem Gerät löschen? Mach vorher ein Backup.')){localStorage.removeItem(KEY);S=defaults();save();U.year=null;U.result=null;render()}break}});
+view.addEventListener('input',e=>{const t=e.target;if(t.id==='fgross'||t.dataset.col!=null)onFormInput(e);
+ if(t.dataset.set==='mwst'){const x=num(t.value);if(isFinite(x)){S.settings.mwst=x;save()}}
+ if(t.dataset.rate){const x=num(t.value);if(isFinite(x)){S.settings.rates[t.dataset.rate]=x;save()}}
+ if(t.dataset.def){const k=U.defs,x=num(t.value);S.settings.defaults[k]=S.settings.defaults[k]||{};if(isFinite(x))S.settings.defaults[k][t.dataset.def]=x;save()}});
+view.addEventListener('change',e=>onFormChange(e));
+$('#file').addEventListener('change',async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;try{const res=importObj(JSON.parse(await f.text()));if(res){U.result=res;U.year=null;render()}}catch(err){alert('Datei konnte nicht geladen werden: '+err.message)}});
+function applyTheme(){const t=S.settings.theme;if(t==='auto')delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=t}
+
+(async function start(){applyTheme();if(S.pin)showLock('unlock');
+ if(/#setup=/.test(location.hash)){const code=location.hash;history.replaceState(null,'',location.pathname+location.search);try{await importSetup(code)}catch(err){U.result=null;alert('Einrichtungslink konnte nicht gelesen werden: '+err.message)}}
+ render();
+ if('serviceWorker'in navigator&&!/nosw/.test(location.search))navigator.serviceWorker.register('sw.js').catch(()=>{})})();
