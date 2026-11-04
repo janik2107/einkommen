@@ -20,7 +20,7 @@ let SUM=new Map();migrate(S,true);buildSrc();
 function save(){localStorage.setItem(KEY,JSON.stringify(S));Calc.setDB(S);SUM=new Map();buildSrc()}
 // Quellen (Arbeitgeber/Auftraggeber) kommen nur aus den eigenen Daten, nicht aus dem Code
 // v1/v2 → v3: Netto-Korrekturen aus v2 werden in „Nach MwSt.“ umgerechnet (gleiches Netto); Netto-Gesamt-Korrekturen entfallen;
-// Zeilen ohne Unterart im neuesten Jahr einer Quelle bekommen die Haupt-Unterart (z. B. „EXCON“ → „CMS EXCON“)
+// Zeilen ohne Unterart im neuesten Jahr einer Quelle bekommen die Haupt-Unterart
 function migrate(st,persist,force){const from=st.v||1;if(from>=3&&!force)return;Calc.setDB(st);const recs=Object.values(st.recs);const T_=r=>st.tables[r.t]||{};
  for(const r of recs){if(!r.ov)continue;const tb=T_(r);
   if(tb.kind==='inc'){const nc=r.net||tb.net;if(r.ov[nc]!=null){const target=+r.ov[nc];delete r.ov[nc];const c=Calc.nachMwstCol(r);let done=false;
