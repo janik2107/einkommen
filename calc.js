@@ -35,21 +35,26 @@ function linear(rec,a,coef,out){if(a.n!=null){out.push(['#',a.n*coef]);return tr
  if(a.o==='neg')return linear(rec,a.a,-coef,out);if(a.o==='+'||a.o==='-')return linear(rec,a.a,coef,out)&&linear(rec,a.b,a.o==='+'?coef:-coef,out);return false}
 // Rechenweg der Netto-Spalte: Basis (meist Überweisung) und alle Zu-/Abzüge in Tabellen-Reihenfolge
 function waterfall(rec,netCol,deep=true){let terms=[[rec.id+':'+netCol,1]];
- for(let guard=0;guard<(deep?12:1);guard++){const bi=terms.findIndex(([k,c])=>k!=='#'&&c>0);if(bi<0)break;const[k,c]=terms[bi];const[id,col]=[k.slice(0,k.lastIndexOf(':')),k.slice(k.lastIndexOf(':')+1)];
+ for(let guard=0;guard<(deep?12:1);guard++){const bi=terms.findIndex(([k,c])=>k[0]!=='#'&&k[0]!=='@'&&c>0);if(bi<0)break;const[k,c]=terms[bi];const[id,col]=[k.slice(0,k.lastIndexOf(':')),k.slice(k.lastIndexOf(':')+1)];
   const r=DB.recs[id],f=r&&r.f&&r.f[col];if(!f||f==='#REF!')break;const out=[];if(!linear(r,parse(f),c,out))break;
+  // Manuell überschriebene Zwischensumme (z. B. „Nach MwSt.“): Rechnung zeigen + Korrektur-Zeile, damit die Summe stimmt
+  if(isOv(r,col)){const mi=out.findIndex(t=>t[0]!=='#'&&t[1]<0);out.splice(mi<0?out.length:mi+1,0,['@'+k,c])}
   terms.splice(bi,1,...out);
   const m=new Map();for(const[kk,cc]of terms)m.set(kk==='#'?'#'+m.size:kk,(m.get(kk)||0)+cc);terms=[...m.entries()].filter(([kk,cc])=>Math.abs(cc)>1e-12).map(([kk,cc])=>[kk.startsWith('#')?'#':kk,cc]);
   const fx=terms.filter(t=>t[0]==='#').reduce((s,t)=>s+t[1],0);terms=terms.filter(t=>t[0]!=='#');if(Math.abs(fx)>1e-12)terms.push(['#',fx])}
- return terms.map(([k,c])=>{if(k==='#')return{key:'#',col:'',label:'Korrektur (fester Betrag)',coef:1,amount:c};
+ return terms.map(([k,c])=>{if(k[0]==='@'){const kk=k.slice(1),i=kk.lastIndexOf(':'),id=kk.slice(0,i),col=kk.slice(i+1),r=DB.recs[id],tb=DB.tables[r.t];const lab=(tb.cols.find(x=>x[0]===col)||[,col])[1]||col;
+   return{key:k,col,label:'Korrektur '+lab.trim()+' (manuell)',coef:c,amount:c*(val(r,col)-raw(r,col)),manual:true,adjOf:col,ovValue:val(r,col),calcValue:raw(r,col)}}
+  if(k==='#')return{key:'#',col:'',label:'Korrektur (fester Betrag)',coef:1,amount:c};
   const i=k.lastIndexOf(':'),id=k.slice(0,i),col=k.slice(i+1),r=DB.recs[id],tb=DB.tables[r.t];const lab=(tb.cols.find(x=>x[0]===col)||[,col])[1]||col;
   return{key:k,col,label:lab+(id!==rec.id?' ('+(r.label||id)+')':''),coef:c,amount:c*val(r,col)}})}
 const isTax=l=>/^ESt|Steuerdiff/i.test(l.trim()),isMwst=l=>/^MwSt/i.test(l.trim());
-function incomeSummary(rec){const tb=DB.tables[rec.t],nc=rec.net||tb.net;const net=val(rec,nc),calcNet=raw(rec,nc),manual=isOv(rec,nc);const w=waterfall(rec,rec.net||tb.net);
- let gross=val(rec,'B'),mwst=0,tax=0,ded=0;const base=w[0];
- for(const x of w.slice(1)){if(isMwst(x.label))mwst-=x.amount;else if(isTax(x.label))tax-=x.amount;else ded-=x.amount}
+function incomeSummary(rec){const tb=DB.tables[rec.t],nc=rec.net||tb.net;const net=val(rec,nc);const w=waterfall(rec,nc);
+ let gross=val(rec,'B'),mwst=0,tax=0,ded=0,adj=0;const base=w[0];const manual=w.some(x=>x.manual);
+ for(const x of w.slice(1)){if(x.manual)adj+=x.amount;else if(isMwst(x.label))mwst-=x.amount;else if(isTax(x.label))tax-=x.amount;else ded-=x.amount}
  if(!gross&&base)gross=base.amount; // Zeile ohne Überweisung: Basis ist der erste Betrag im Rechenweg
  else if(base&&base.col!=='B')ded+=gross-base.amount; // Basis ≠ Überweisung: Differenz zählt als Abzug
- if(manual)w.push({key:'#ov',col:nc,label:'Manuelle Korrektur',coef:1,amount:net-calcNet,manual:true});
- return{gross,mwst,tax,ded,net,calcNet,manual,steps:w}}
-G.Calc={setDB,clear,val,raw,isOv,waterfall,incomeSummary,parse,isTax,isMwst,numv};
+ return{gross,mwst,tax,ded,adj,net,manual,steps:w}}
+// Spalte „Nach MwSt.“ (Zwischensumme nach MwSt.), falls die Tabelle eine hat
+function nachMwstCol(rec){const tb=DB.tables[rec.t];const c=(tb.cols||[]).find(([k,l])=>/^Nach MwSt/i.test(String(l).trim()));return c&&rec.f&&rec.f[c[0]]?c[0]:null}
+G.Calc={setDB,clear,val,raw,isOv,nachMwstCol,waterfall,incomeSummary,parse,isTax,isMwst,numv};
 })(typeof window!=='undefined'?window:globalThis);

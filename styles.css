@@ -75,3 +75,7 @@ details.group summary{list-style:none;padding:13px 16px;color:var(--accent);curs
 .mfoot{display:flex;justify-content:flex-end;margin:2px 4px 0}.mfoot .link{font-size:14px}
 .yh{display:flex;justify-content:space-between;align-items:center;width:100%;background:none;border-radius:0;padding:18px 4px 8px;font-size:22px;font-weight:700;text-align:left}.yh span:last-child{font-size:13px;font-weight:500;color:var(--sec);display:flex;align-items:center;gap:8px}
 .tw{font-style:normal;font-size:20px;color:var(--accent);transition:transform .2s;display:inline-block}.tw.o{transform:rotate(90deg)}
+/* v3: Nach MwSt. änderbar */
+.wf .nm{cursor:pointer}.wf .nm .r{display:flex;align-items:center;gap:6px;justify-content:flex-end}.wf .nm .pen{color:var(--accent)}
+.wf .subt.edit input{font-weight:700;color:var(--accent)}.wf .ovrow{min-height:38px}.wf .ovrow small{color:var(--sec);font-size:13px;margin:0}.wf .ovrow .link{font-size:14px;white-space:nowrap}
+.wf .ovrow .l small{white-space:normal;line-height:1.35}
