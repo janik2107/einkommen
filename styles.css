@@ -103,3 +103,7 @@ details.group summary{list-style:none;padding:13px 16px;color:var(--accent);curs
 .tinted{background:var(--tint);color:var(--accent);font-weight:600}
 body.nohints .hint{display:none}
 .swdel{visibility:hidden}.swipe.open .swdel,.swipe.sw .swdel{visibility:visible}
+/* v6: aktueller Monat */
+.nowm .lbl{display:flex;align-items:center;gap:6px}.nowdot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(52,199,89,.2)}
+.nowl{margin:12px -16px -16px;border-radius:0 0 14px 14px;box-shadow:none;border-top:.5px solid var(--sep)}
+.chart .now{fill:#fff;font-weight:700}.chart .nowbg{fill:var(--accent)}

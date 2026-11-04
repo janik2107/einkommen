@@ -1,5 +1,5 @@
 'use strict';
-const VERSION='ek-v5',KEY='einkommen-v1';
+const VERSION='ek-v6',KEY='einkommen-v1';
 const $=s=>document.querySelector(s),view=$('#view');
 const EUR=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
 const fm=x=>isFinite(x)?EUR.format(Math.abs(x)<.005?0:x):'—';
@@ -77,15 +77,20 @@ function deriveRates(){const R=S.settings.rates;for(const r of incs()){if(r.plan
 function rateFor(src,y){const R=S.settings.rates;if(R[src+':'+y]!=null)return R[src+':'+y];const ks=Object.keys(R).filter(k=>k.startsWith(src+':')).sort();return ks.length?R[ks[ks.length-1]]:30}
 
 /* ---------- Rendering ---------- */
-function setTab(t){U.tab=t;U.detail=null;U.check=null;U.wfEdit=null;U.tedit=null;U.sheet=null;U.archive=false;U.amonth=null;U.barch=false;U.netEdit=null;if(t!=='new'||(U.form&&U.form.mode==='edit'))U.form=null;U.bedit=false;U.defs=null;render();scrollTo(0,0)}
-function yearSegs(){const ys=years();if(!ys.length)return'';return`<div class="segs">${ys.map(y=>`<button class="seg ${y===U.year?'on':''}" data-act="year" data-v="${y}">${y}</button>`).join('')}</div>`}
+function setTab(t){U.tab=t;if(t==='home')U.year=new Date().getFullYear();U.detail=null;U.check=null;U.wfEdit=null;U.tedit=null;U.sheet=null;U.archive=false;U.amonth=null;U.barch=false;U.netEdit=null;if(t!=='new'||(U.form&&U.form.mode==='edit'))U.form=null;U.bedit=false;U.defs=null;render();scrollTo(0,0)}
+function yearSegs(){const y0=years();if(!y0.length)return'';const ys=[...new Set([...y0,new Date().getFullYear()])].sort((a,b)=>b-a);return`<div class="segs">${ys.map(y=>`<button class="seg ${y===U.year?'on':''}" data-act="year" data-v="${y}">${y}</button>`).join('')}</div>`}
 function render(){document.querySelectorAll('.tabbar button').forEach(b=>b.classList.toggle('on',b.dataset.tab===U.tab));
- if(U.year==null){const ys=years(),cy=new Date().getFullYear();U.year=ys.includes(cy)?cy:ys[ys.length-1]||cy}
+ if(U.year==null)U.year=new Date().getFullYear();U.ym=curYM();
  let h;if(U.check&&S.recs[U.check])h=checklist();else if(U.detail)h=detail();else if(U.form&&U.form.mode==='edit')h=form();else h={home,list,new:form,budget,settings}[U.tab]();
  view.innerHTML=`<div class="tab">${h}</div>`;renderSheet();if(U.tab==='new'||U.form)refreshForm()}
 function emptyHint(){return`<div class="card empty"><b>Noch keine Daten</b><p>Öffne den Einrichtungslink oder lade in den Einstellungen die Einrichtungsdatei.</p><button class="link" data-act="tab" data-v="settings">Zu den Einstellungen</button></div>`}
 function resultPanel(){const r=U.result;if(!r)return'';return`<div class="panel"><h3>${r.already?'Schon importiert':'Import fertig'}</h3>${r.already?'<p>Diese Daten sind bereits in der App. Es wurde nichts doppelt angelegt.</p>':`<p><b>${r.add}</b> Einträge übernommen${r.skip?`, ${r.skip} waren schon da`:''}.</p>${r.notes?`<p>${r.notes} Einträge haben einen Hinweis (z. B. Tag unbekannt, Tippfehler im Jahr korrigiert, kaputte Formel in Numbers) – du siehst ihn in der Detailansicht.</p>`:''}`}<button class="link" data-act="closeres">OK</button></div>`}
 
+function nowMonth(y){const m=new Date().getMonth(),L=incs(y).filter(r=>mo(r)===m),I=L.filter(r=>!r.plan),P=L.filter(r=>r.plan);
+ const n=I.reduce((x,r)=>x+sm(r).net,0),g=I.reduce((x,r)=>x+sm(r).gross,0),pn=P.reduce((x,r)=>x+sm(r).net,0);
+ return`<div class="card hero nowm"><div class="lbl"><span class="nowdot"></span>Aktueller Monat · ${MON[m]} ${y}</div><div class="big">${fm(n)}</div>
+ <div class="sub">${I.length?`netto aus ${fm(g)} brutto · ${I.length} ${I.length===1?'Überweisung':'Überweisungen'}`:'noch keine Überweisung eingegangen'}${P.length?` · <span class="badge" style="margin:0 3px 0 0">Plan</span>+ ${fm(pn)}`:''}</div>
+ ${L.length?`<div class="group ic nowl">${L.slice(0,5).map(r=>`<button class="cell" data-act="open" data-id="${r.id}"><span class="av ${SR(srcOf(r)).cls}">${SR(srcOf(r)).l}</span><div class="l">${esc(title(r))}${r.plan?'<span class="badge">Plan</span>':''}<small>${dtext(r)}</small></div><div class="r"><b>${fm(sm(r).net)}</b></div><span class="chev">›</span></button>`).join('')}</div>`:''}</div>`}
 function home(){if(!years().length)return`<h1>Übersicht</h1>${resultPanel()}${emptyHint()}`;
  const y=U.year,a=agg(incs(y)),cur=y===new Date().getFullYear(),istM=incs(y).filter(r=>!r.plan).map(mo),lastM=istM.length?Math.max(...istM):11,p=agg(incs(y-1).filter(r=>!cur||mo(r)<=lastM)),hasPrev=incs(y-1).length>0;
  const planM=[...new Set(incs(y).filter(r=>r.plan).map(mo))].sort((x,z)=>x-z);
@@ -98,11 +103,12 @@ function home(){if(!years().length)return`<h1>Übersicht</h1>${resultPanel()}${e
   const tot=mt(m);
   svg+=SRCS.map(k=>seg(m[k+'ist'],SR(k).col,1)).join('')+seg(SRCS.reduce((x,k)=>x+(m[k+'plan']||0),0),'url(#hatch)',1);
   if(tot>0)svg+=`<text class="vl" x="${x+bw/2}" y="${yb-3}" text-anchor="middle">${fk(tot)}</text>`;
-  svg+=`<text x="${x+bw/2}" y="${B+13}" text-anchor="middle">${MON[i][0]}</text>`});svg+='</svg>';
+  const now=cur&&i===new Date().getMonth();if(now)svg+=`<rect class="nowbg" x="${x-3}" y="${B+3}" width="${bw+6}" height="14" rx="7"/>`;
+  svg+=`<text x="${x+bw/2}" y="${B+13}" text-anchor="middle"${now?' class="now"':''}>${MON[i][0]}</text>`});svg+='</svg>';
  const SV=SRCS.map(k=>[k,a.src[k]||{g:0,n:0,c:0,t:0}]),tn=SV.reduce((x,[,v])=>x+v.n,0)||1;
  const cmp=(lbl,c,v)=>{const d=c-v,pc=v?d/Math.abs(v)*100:NaN;return`<div class="cell"><div class="l">${lbl}<small>${y-1}: ${fm(v)}</small></div><div class="r"><b>${fm(c)}</b><br><span class="${d>=0?'up':'down'}">${d>=0?'+':'−'}${fm(Math.abs(d))}${isFinite(pc)?' ('+(d>=0?'+':'−')+pct(Math.abs(pc))+')':''}</span></div></div>`};
  const firstM=incs(y-1).length?Math.min(...incs(y-1).map(mo)):0;
- return`<h1>Übersicht</h1>${resultPanel()}${yearSegs()}
+ return`<h1>Übersicht</h1>${resultPanel()}${yearSegs()}${cur?nowMonth(y):''}
  <div class="card hero"><div class="lbl">Netto ${y}</div><div class="big">${fm(a.ist.n)}</div><div class="sub">aus ${fm(a.ist.g)} brutto · ${pct(a.ist.g?a.ist.n/a.ist.g*100:NaN)} bleiben</div>${a.plan.c?`<div class="sub" style="margin-top:6px"><span class="badge" style="margin:0 4px 0 0">Plan</span>+ ${fm(a.plan.n)} netto geplant (${planM.map(i=>MON[i].slice(0,3)).join(', ')})</div>`:''}</div>
  <div class="grid"><div class="tile"><span>Brutto</span><b>${fm(a.ist.g)}</b><small>${a.ist.c} Überweisungen</small></div><div class="tile"><span><i class="dotc" style="background:var(--red)"></i>Einkommensteuer</span><b>${fm(a.ist.t)}</b><small>${pct(a.ist.g?a.ist.t/a.ist.g*100:NaN)} vom Brutto</small></div>
  <div class="tile"><span><i class="dotc" style="background:var(--orange)"></i>MwSt.</span><b>${fm(a.ist.m)}</b><small>geht ans Finanzamt</small></div><div class="tile"><span><i class="dotc" style="background:var(--sec)"></i>Abzüge</span><b>${fm(a.ist.d)}</b><small>Gehälter, Auto, Büro …</small></div></div>
@@ -385,7 +391,7 @@ function importObj(o){if(!o||o.app!=='einkommen'||!Array.isArray(o.records))thro
  Calc.setDB(S);SUM=new Map();migrate(S,false,true);deriveRates();save();return{add,skip,notes}}
 async function importSetup(code){code=code.trim().replace(/^.*#setup=/,'');const fp=(await sha(code)).slice(0,24);
  if(S.setups.includes(fp)&&all().length){U.result={already:true};return}
- const o=JSON.parse(await inflate(unb64u(code)));const res=importObj(o);if(res){S.setups.push(fp);save();U.result=res;const ys=years();U.year=ys.includes(new Date().getFullYear())?new Date().getFullYear():ys[ys.length-1]}}
+ const o=JSON.parse(await inflate(unb64u(code)));const res=importObj(o);if(res){S.setups.push(fp);save();U.result=res;U.year=new Date().getFullYear()}}
 function download(name,text,type){const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}
 function exportBackup(){const o={app:'einkommen',v:5,kind:'backup',created:new Date().toISOString(),tables:S.tables,records:all(),settings:S.settings,setups:S.setups,archive:S.archive||{}};download('einkommen-backup-'+today()+'.json',JSON.stringify(o),'application/json');toast('Backup erstellt')}
 function exportCSV(){const n=x=>isFinite(x)?(+x.toFixed(2)).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2,useGrouping:false}):'';const q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
@@ -405,7 +411,7 @@ async function pinKey(k){if(k==='x'){$('#lock').hidden=true;return}if(k==='b'){p
  if(!pinFirst){pinFirst=p;pinBuf='';drawLock();return}
  if(pinFirst!==p){pinFirst='';pinBuf='';drawLock('Stimmt nicht überein – bitte neu');return}
  const salt=[...crypto.getRandomValues(new Uint8Array(12))].map(b=>b.toString(16).padStart(2,'0')).join('');S.pin={salt,hash:await sha(salt+p)};save();$('#lock').hidden=true;toast('PIN-Sperre an');render()}
-let hiddenAt=0;document.addEventListener('visibilitychange',()=>{if(document.hidden)hiddenAt=Date.now();else if(S.pin&&hiddenAt&&Date.now()-hiddenAt>60000&&$('#lock').hidden)showLock('unlock')});
+let hiddenAt=0;document.addEventListener('visibilitychange',()=>{if(document.hidden)hiddenAt=Date.now();else{if(U.tab==='home'&&!U.detail&&!U.check&&((hiddenAt&&Date.now()-hiddenAt>60000)||U.ym!==curYM())){U.year=new Date().getFullYear();render()}}if(!document.hidden)if(S.pin&&hiddenAt&&Date.now()-hiddenAt>60000&&$('#lock').hidden)showLock('unlock')});
 
 /* ---------- Events ---------- */
 const splitKey=k=>{const i=k.lastIndexOf(':');return[k.slice(0,i),k.slice(i+1)]};
