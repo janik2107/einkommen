@@ -120,3 +120,7 @@ body.nohints .hint{display:none}
 .vatprev .r{text-align:right;font-variant-numeric:tabular-nums}.vatprev .r b{font-size:16px}
 .gotbox{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;margin-bottom:10px}
 .gotbox .gotl{font-size:14px;color:var(--sec)}.gotbox .gotl b{color:var(--text)}.gotbox .gotl small{display:block;margin-top:2px}
+
+/* ek-v9 Brutto-Hervorhebung */
+.bruttohero .bigb{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.3px}
+.bruttohero .l small{display:block;margin-top:2px}
