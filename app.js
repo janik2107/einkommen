@@ -1,5 +1,5 @@
 'use strict';
-const VERSION='ek-v7',KEY='einkommen-v1';
+const VERSION='ek-v8',KEY='einkommen-v1';
 const $=s=>document.querySelector(s),view=$('#view');
 const EUR=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
 const fm=x=>isFinite(x)?EUR.format(Math.abs(x)<.005?0:x):'—';
@@ -13,7 +13,7 @@ const num=s=>{s=String(s??'').trim().replace(/[€\s]/g,'');if(!s)return NaN;if(
 const inpE=x=>isFinite(x)&&x!==''?(+x).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
 const inp=x=>isFinite(x)&&x!==''?(+(+x).toFixed(2)).toLocaleString('de-DE',{maximumFractionDigits:2,useGrouping:false}):'';
 const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
-function defaults(){return{v:7,archive:{},tables:{},recs:{},settings:{mwst:19,rates:{},defaults:{},rhythm:{},theme:'auto'},pin:null,setups:[]}}
+function defaults(){return{v:8,archive:{},tables:{},recs:{},settings:{mwst:19,rates:{},defaults:{},rhythm:{},theme:'auto'},pin:null,setups:[]}}
 function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.recs){s.settings=Object.assign(defaults().settings,s.settings);s.setups=s.setups||[];s.archive=s.archive||{};return s}}catch(e){}return defaults()}
 let S=load();Calc.setDB(S);
 let SUM=new Map();migrate(S,true);buildSrc();
@@ -21,7 +21,7 @@ function save(){localStorage.setItem(KEY,JSON.stringify(S));Calc.setDB(S);SUM=ne
 // Quellen (Arbeitgeber/Auftraggeber) kommen nur aus den eigenen Daten, nicht aus dem Code
 // v1/v2 → v3: Netto-Korrekturen aus v2 werden in „Nach MwSt.“ umgerechnet (gleiches Netto); Netto-Gesamt-Korrekturen entfallen;
 // Zeilen ohne Unterart im neuesten Jahr einer Quelle bekommen die Haupt-Unterart
-function migrate(st,persist,force){const from=st.v||1;if(from>=7&&!force)return;Calc.setDB(st);const recs=Object.values(st.recs);const T_=r=>st.tables[r.t]||{};
+function migrate(st,persist,force){const from=st.v||1;if(from>=8&&!force)return;Calc.setDB(st);const recs=Object.values(st.recs);const T_=r=>st.tables[r.t]||{};
  for(const r of recs){if(!r.ov)continue;const tb=T_(r);
   if(tb.kind==='inc'){const nc=r.net||tb.net;if(r.ov[nc]!=null){const target=+r.ov[nc];delete r.ov[nc];const c=Calc.nachMwstCol(r);let done=false;
     if(c){Calc.clear();const d0=Calc.raw(r,c);r.ov[c]=d0;Calc.clear();const n0=Calc.val(r,nc);r.ov[c]=d0+1000;Calc.clear();const n1=Calc.val(r,nc);const k=(n1-n0)/1000;
@@ -35,7 +35,7 @@ function migrate(st,persist,force){const from=st.v||1;if(from>=7&&!force)return;
   const pre=new Set(rs.filter(r=>r.sub&&String(r.label||'').toUpperCase().startsWith(r.sub.toUpperCase()+' ')).map(r=>r.sub));
   const main=(ry.find(r=>r.sub&&pre.has(r.sub))||{}).sub;if(!main)continue;
   for(const r of rs)if(!r.sub){r.sub=main;if(r.label&&!String(r.label).toUpperCase().startsWith(main.toUpperCase()+' '))r.label=main+' '+r.label}}
- st.settings=st.settings||{};st.settings.rhythm=st.settings.rhythm||{};st.v=7;Calc.setDB(S===st?st:S);if(persist)try{localStorage.setItem(KEY,JSON.stringify(st))}catch(e){}}
+ st.settings=st.settings||{};st.settings.rhythm=st.settings.rhythm||{};st.v=8;Calc.setDB(S===st?st:S);if(persist)try{localStorage.setItem(KEY,JSON.stringify(st))}catch(e){}}
 function buildSrc(){const g={};for(const r of Object.values(S.recs)){const t=S.tables[r.t];if(!t||t.kind!=='inc'||!t.source)continue;g[t.source]=(g[t.source]||0)+(Calc.numv(r.v&&r.v.B)||0)}
  SRCS=Object.keys(g).sort((a,b)=>g[b]-g[a]);SRC={};SRCS.forEach((k,i)=>SRC[k]={name:k.length>5&&k===k.toUpperCase()?k[0]+k.slice(1).toLowerCase():k,cls:'s'+(i%4),col:`var(--s${i%4})`,l:k[0].toUpperCase()})}
 const SR=k=>SRC[k]||NOSRC;
@@ -47,6 +47,12 @@ const isInc=r=>T(r).kind==='inc',isBud=r=>T(r).kind==='bud';
 const srcOf=r=>T(r).source;
 const netCol=r=>r.net||T(r).net;
 const sm=r=>{if(!SUM.has(r.id))SUM.set(r.id,Calc.incomeSummary(r));return SUM.get(r.id)};
+const vatOf=r=>isFinite(r&&r.vat)?+r.vat:(S.settings.mwst??19);
+const bruttoFromNet=(net,vat)=>Math.round((+net||0)*(1+(+vat||0)/100)*100)/100;
+const mwstFromNet=(net,vat)=>Math.round((+net||0)*((+vat||0)/100)*100)/100;
+const syncNetToGross=d=>{const n=d.enteredNet;if(!(n>0)||(d.f&&d.f.B))return;const b=bruttoFromNet(n,vatOf(d));d.v.B=b;if(d.gotB==null)d.expB=b};
+const applyGross=(r,sum)=>{if(!(sum>0)||(r.f&&r.f.B))return;if(r.expB==null&&isFinite(r.v&&r.v.B)&&r.v.B>0)r.expB=+r.v.B;r.gotB=+sum;r.v.B=+sum;Calc.clear();SUM.delete(r.id)};
+
 const yr=r=>+String(r.date||'').slice(0,4),mo=r=>+String(r.date||'').slice(5,7)-1;
 const all=()=>Object.values(S.recs);
 const byDate=(a,b)=>(a.date||'').localeCompare(b.date||'')||ordr(a)-ordr(b);
@@ -200,7 +206,8 @@ function detailInc(r,tb){const s=sm(r);const ed=U.wfEdit===r.id;
  return`<div class="navbar"><button data-act="back">‹ ${U.amonth?'Archiv':U.tab==='budget'?'Verteilung':'Einnahmen'}</button><button data-act="edit" data-id="${r.id}">Bearbeiten</button></div>
  <div class="dhead"><span class="av ${SR(srcOf(r)).cls}" style="margin:0 auto;width:44px;height:44px;flex:none;border-radius:12px;font-size:20px">${SR(srcOf(r)).l}</span><h2>${esc(title(r))}${r.plan?'<span class="badge">Plan</span>':''}</h2><div class="t">${dtext(r)}</div><div class="big">${fm(s.net)}</div><div class="t">netto von ${fm(s.gross)} brutto${s.manual?' · Nach MwSt. manuell':''}</div></div>
  ${r.plan?`<div class="card" style="text-align:center"><div style="color:var(--sec);font-size:15px;margin-bottom:10px">Diese Einnahme ist noch geplant.</div><button class="primary" data-act="transfer" data-id="${r.id}">Überweisung ist eingegangen</button></div>`:
- `<div class="group ic"><button class="cell" data-act="checkopen" data-id="${r.id}"><span class="av ck ${it.length&&done===it.length?'all':''}">✓</span><div class="l">Ausgaben überweisen<small>${done} von ${it.length} erledigt${it.length-done?' · offen '+fm(it.filter(x=>!isDone(x)).reduce((a,x)=>a+x.amount,0)):''}</small></div><span class="chev">›</span></button></div>`}
+ `${r.gotB!=null?`<div class="card gotbox"><div class="gotl">Eingegangen <b>${fm(r.gotB)}</b>${r.expB!=null&&Math.abs(r.gotB-r.expB)>0.004?` <span class="badge man">statt ${fm(r.expB)}</span>`:''}${r.enteredNet!=null?`<small> · aus Netto ${fm(r.enteredNet)} + ${pct(vatOf(r))} MwSt.</small>`:''}</div><button class="link" data-act="gotedit" data-id="${r.id}">Betrag ändern</button></div>`:''}
+ <div class="group ic"><button class="cell" data-act="checkopen" data-id="${r.id}"><span class="av ck ${it.length&&done===it.length?'all':''}">✓</span><div class="l">Ausgaben überweisen<small>${done} von ${it.length} erledigt${it.length-done?' · offen '+fm(it.filter(x=>!isDone(x)).reduce((a,x)=>a+x.amount,0)):''}</small></div><span class="chev">›</span></button></div>`}
  <div class="gh"><span>Rechenweg wie in der Tabelle</span><button class="link" data-act="wfedit" data-id="${r.id}" style="font-size:13px;padding:0;text-transform:none">${ed?'Fertig':'Posten bearbeiten'}</button></div>${!ed&&Calc.nachMwstCol(r)&&!s.manual?'<div class="foot hint" style="margin:-2px 16px 8px">Tippe auf „Nach MwSt.“, um den Betrag zu ändern.</div>':''}
  <div class="group wf">${steps(r,s)}</div>${ed?`<div class="group" style="margin-top:8px"><button class="cell btn" data-act="ladd" data-id="${r.id}">+ Posten hinzufügen</button></div><div class="foot hint">Namen und Beträge direkt ändern. Mit − entfernst du einen Posten. Netto und Steuer rechnen sofort neu.</div>`:''}
  ${removedBlock(r)}
@@ -217,22 +224,27 @@ function checkItems(r){if(isInc(r)){const s=sm(r);return s.steps.slice(1).filter
 function openCount(r){if(!r.chk||r.plan)return 0;return checkItems(r).filter(x=>!(r.done&&r.done[x.key])).length}
 function checklist(){const r=S.recs[U.check],it=checkItems(r),bud=isBud(r);const dn=x=>!!(r.done&&r.done[x.key]);const done=it.filter(dn).length,open=it.filter(x=>!dn(x)).reduce((a,x)=>a+x.amount,0);
  return`<div class="navbar"><button data-act="checkclose">‹ Zurück</button></div><h1 style="margin-top:2px">${bud?'Verteilung abhaken':'Ausgaben überweisen'}</h1>
+ ${!bud&&r.gotB!=null?`<div class="card gotbox"><div class="gotl">Eingegangen <b>${fm(r.gotB)}</b>${r.expB!=null&&Math.abs(r.gotB-r.expB)>0.004?` <span class="badge man">statt ${fm(r.expB)}</span>`:''}</div><button class="link" data-act="gotedit" data-id="${r.id}">Betrag ändern</button></div>`:''}
  <div class="card"><div class="hero"><div class="lbl">${bud?MON[mo(r)]+' '+yr(r):esc(title(r))+' · '+dtext(r)}</div><div class="big">${done} von ${it.length}</div><div class="sub">erledigt${open>0.004?' · noch offen '+fm(open):' · alles erledigt'}</div></div><div class="bar"><i style="width:${it.length?done/it.length*100:0}%"></i></div></div>
  <div class="group ic">${it.map(x=>`<button class="cell ckrow ${dn(x)?'done':''}" data-act="ck" data-v="${esc(x.key)}"><span class="cbox">${dn(x)?'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>':''}</span><div class="l">${esc(x.name)}${x.tag?`<small>${x.tag}</small>`:''}</div><div class="r"><b>${fm(x.amount)}</b></div></button>`).join('')||'<div class="cell"><div class="l" style="color:var(--sec)">Keine Posten.</div></div>'}</div>
  <div class="rowbtns"><button data-act="ckall" data-v="0">Alle zurücksetzen</button><button class="tinted" data-act="ckall" data-v="1">Alle abhaken</button></div>
  <div class="foot hint">Tippe einen Posten an, wenn du ihn überwiesen hast. Der Stand wird gespeichert.</div>`}
 /* ---------- Überweisung prüfen (Sheet) ---------- */
 function renderSheet(){let el=$('#sheet');if(!el){el=document.createElement('div');el.id='sheet';document.body.appendChild(el)}const sh=U.sheet;if(!sh){el.innerHTML='';el.hidden=true;return}el.hidden=false;
- el.innerHTML=`<div class="sback" data-act="shclose"></div><div class="sheetp" role="dialog"><div class="grab"></div><h3>Überweisung prüfen</h3>
+ const exp=sh.exp!=null?sh.exp:sh.sum;
+ el.innerHTML=`<div class="sback" data-act="shclose"></div><div class="sheetp" role="dialog"><div class="grab"></div><h3>${sh.mode==='got'?'Eingegangenen Betrag ändern':'Zahlungseingang'}</h3>
  <div class="group"><label class="cell"><span>Überweisungstag</span><input type="date" id="shdate" value="${esc(sh.date)}"></label></div>
- <p class="q">Stimmt die Überweisungssumme?</p>${sh.editSum?`<input id="shsum" class="bigin" inputmode="decimal" value="${inpE(sh.sum)}">`:`<div class="bigv num">${fm(sh.sum)}</div>`}
- <div class="rowbtns">${sh.editSum?`<button data-act="shcancel">Abbrechen</button><button class="primary" style="width:auto;flex:1" data-act="shok">Übernehmen</button>`:`<button data-act="shedit">Ändern</button><button class="primary" style="width:auto;flex:1" data-act="shok">Ja, passt</button>`}</div></div>`;
- if(sh.editSum){const i=$('#shsum');i.focus();i.select()}}
+ <p class="q">Wie viel ist tatsächlich eingegangen?</p>
+ <input id="shsum" class="bigin" inputmode="decimal" value="${inpE(sh.sum)}">
+ <div class="foot" style="margin-top:8px">Erwartete Überweisung (brutto): ${fm(exp)}</div>
+ <div class="rowbtns"><button data-act="shcancel">${sh.mode==='got'?'Schließen':'Abbrechen'}</button><button class="primary" style="width:auto;flex:1" data-act="shok">Übernehmen</button></div></div>`;
+ const i=$('#shsum');i.focus();i.select()}
 function setFormDate(F,v){const d=F.rec,old=String(d.date);d.date=v;if(F.mode==='new'&&old.slice(0,7)!==v.slice(0,7))rhApply(d,F.src,F.sub,v);if(F.mode==='new'&&old.slice(0,4)!==v.slice(0,4)){const rx=/\[\$rate:([A-Z]+):\d+\]/;for(const c in d.f)d.f[c]=d.f[c].replace(rx,'[$rate:$1:'+v.slice(0,4)+']');for(const c in F.orig)F.orig[c]=F.orig[c].replace(rx,'[$rate:$1:'+v.slice(0,4)+']')}}
-function sheetOk(){const sh=U.sheet;const date=$('#shdate').value||sh.date;let sum=sh.sum;if(sh.editSum){const x=num($('#shsum').value);if(!(x>0)){toast('Bitte Betrag eingeben');return}sum=x}
+function sheetOk(){const sh=U.sheet;const date=$('#shdate').value||sh.date;const x=num($('#shsum').value);if(!(x>0)){toast('Bitte Betrag eingeben');return}const sum=x,exp=sh.exp!=null?sh.exp:sh.sum;
  U.sheet=null;
- if(sh.mode==='form'){const F=U.form;setFormDate(F,date);if(!F.rec.f.B)F.rec.v.B=sum;const id=saveForm(true);if(id){const r=S.recs[id];r.chk=true;save();U.check=id;render();scrollTo(0,0)}return}
- if(sh.mode==='plan'){const r=S.recs[sh.id];r.date=date;r.plan=false;delete r.empty;if(!r.f.B)r.v.B=sum;r.notes=(r.notes||[]).filter(n=>!/Tag unbekannt/.test(n));r.notes.push('Überweisung am '+date.split('-').reverse().join('.')+' bestätigt');r.chk=true;save();U.detail=r.id;U.check=r.id;toast('Eingang gesichert');render();scrollTo(0,0)}}
+ if(sh.mode==='form'){const F=U.form;setFormDate(F,date);if(!F.rec.f.B){if(F.rec.expB==null)F.rec.expB=F.rec.v.B||exp;F.rec.gotB=sum;F.rec.v.B=sum}const id=saveForm(true);if(id){const r=S.recs[id];r.chk=true;if(Math.abs(sum-exp)>0.004)(r.notes=r.notes||[]).push('Eingegangen '+fm(sum)+' statt erwartet '+fm(exp));save();U.check=id;render();scrollTo(0,0)}return}
+ if(sh.mode==='plan'||sh.mode==='got'){const r=S.recs[sh.id];if(sh.mode==='plan'){r.date=date;r.plan=false;delete r.empty;r.notes=(r.notes||[]).filter(n=>!/Tag unbekannt/.test(n));r.notes.push('Überweisung am '+date.split('-').reverse().join('.')+' bestätigt');r.chk=true}
+  applyGross(r,sum);if(Math.abs(sum-exp)>0.004)(r.notes=r.notes||[]).push('Eingegangen '+fm(sum)+' statt erwartet '+fm(exp));save();U.detail=r.id;if(sh.mode==='plan')U.check=r.id;toast(sh.mode==='got'?'Betrag geändert':'Eingang gesichert');render();scrollTo(0,0)}}
 /* ---------- Posten bearbeiten ---------- */
 const CONSTF=/^[\d\s.+\-*/()]+$/;
 const isConstF=f=>!!f&&f!=='#REF!'&&CONSTF.test(f);
@@ -303,7 +315,10 @@ function form(){if(!years().length)return`<h1>Neue Einnahme</h1>${emptyHint()}`;
  ${edit?`<div class="info">${esc(title(d))} · ${esc(d.label||'')}</div>`:`<div class="segs">${SRCS.map(k=>`<button class="seg ${F.src===k?'on':''}" data-act="fsrc" data-v="${k}">${SR(k).name}</button>`).join('')}</div>
  <div class="chips">${subsOf(F.src).map(s=>`<button class="chip ${F.sub===s?'on':''}" data-act="fsub" data-v="${esc(s)}">${esc(s||SR(F.src).name)}</button>`).join('')}</div>`}
  <div class="group"><label class="cell"><span>Datum</span><input type="date" id="fdate" value="${esc(String(d.date).length===10?d.date:d.date+'-01')}"></label>
- <label class="cell"><span>Überweisung (brutto)</span><input id="fgross" inputmode="decimal" placeholder="0,00 €" value="${d.v.B?inpE(d.v.B):''}" ${d.f.B?'disabled':''}></label>
+ <label class="cell"><span>Netto (ohne MwSt.)</span><input id="fnetto" inputmode="decimal" placeholder="0,00 €" value="${d.enteredNet!=null?inpE(d.enteredNet):''}" ${d.f.B?'disabled':''}></label>
+ <div class="cell"><div class="l">MwSt.-Satz</div><div class="segs mini">${[19,7,0].map(v=>`<button type="button" class="seg ${vatOf(d)===v?'on':''}" data-act="fvat" data-v="${v}">${v}&nbsp;%</button>`).join('')}</div></div>
+ <div class="cell vatprev"><div class="l">MwSt. ${pct(vatOf(d))}<small>Überweisung erwartet (brutto)</small></div><div class="r"><b id="fmwstv">${fm(mwstFromNet(d.enteredNet||0,vatOf(d)))}</b><br><b id="fbruttov">${fm(d.v.B||0)}</b></div></div>
+ ${d.enteredNet==null&&d.v.B>0?`<div class="cell"><div class="l" style="color:var(--sec);font-size:13px">Bisher nur Brutto gespeichert (${fm(d.v.B)}). Netto eingeben zum Neu-Rechnen – sonst bleibt der Brutto-Betrag.</div></div>`:''}
  <label class="cell"><span>Noch nicht erhalten (Plan)</span><input type="checkbox" id="fplan" ${d.plan?'checked':''} style="flex:0;width:22px;height:22px;accent-color:var(--accent)"></label></div>
  <div class="gh"><span>Rechenweg</span><span id="fnet"></span></div><div class="group wf" id="fsteps"></div>
  ${(()=>{const ex=extraCols(d);return ex.length?`<div class="gh">Für die Steuer (nicht vom Netto abgezogen)</div><div class="group">${ex.map(([c,l])=>`<label class="cell"><span>${esc(l)}</span><input data-col="${c}" inputmode="decimal" value="${inpE(d.v[c])}"></label>`).join('')}</div>`:''})()}
@@ -322,16 +337,16 @@ function refreshForm(){const F=U.form,box=$('#fsteps');if(!F||!F.rec||!box)retur
   else{box.querySelectorAll('input[data-col]').forEach(i=>{const c=i.dataset.col;if(d.f[c]){const st=s.steps.find(x=>x.col===c&&x.key.startsWith(d.id));if(st)i.placeholder=inpE(Math.abs(st.amount))}});$('#fnetv').textContent=fm(s.net)}
   $('#fnet').textContent='Steuer '+fm(s.tax)});}
 function onFormInput(e){const F=U.form;if(!F||!F.rec)return;const d=F.rec,t=e.target;
- if(t.id==='fgross'){d.v.B=num(t.value)||0;refreshForm();return}
+ if(t.id==='fnetto'){const n=num(t.value);d.enteredNet=isFinite(n)&&t.value.trim()!==''?n:null;syncNetToGross(d);const m=$('#fmwstv'),b=$('#fbruttov');if(m)m.textContent=fm(mwstFromNet(d.enteredNet||0,vatOf(d)));if(b)b.textContent=fm(d.v.B||0);refreshForm();return}
  if(t.dataset.col){const c=t.dataset.col,v=num(t.value);const orig=F.orig[c];
   if(t.value.trim()===''){if(orig){d.f[c]=orig}else d.v[c]=0}else{if(orig)delete d.f[c];d.v[c]=isFinite(v)?v:0}refreshForm()}}
 function onFormChange(e){const F=U.form;if(!F||!F.rec)return;const d=F.rec,t=e.target;
  if(t.id==='fdate'&&t.value){setFormDate(F,t.value);render()}
  if(t.id==='fplan')d.plan=t.checked;if(t.id==='frepl'){F.replace=t.checked;render()}if(t.id==='fbud')F.addBudget=t.checked}
 function freeze(f){return f.replace(/\[\$mwst\]/g,'('+S.settings.mwst/100+')').replace(/\[\$rate:([A-Z]+):(\d+)\]/g,(m,s,y)=>'('+rateFor(s,+y)/100+')')}
-function saveForm(confirmed){const F=U.form,d=F.rec;if(!(d.v.B>0)&&!d.f.B&&!(F.mode==='edit')){toast('Bitte Brutto-Betrag eingeben');return}
+function saveForm(confirmed){const F=U.form,d=F.rec;if(d.enteredNet>0)syncNetToGross(d);if(!(d.v.B>0)&&!d.f.B&&!(F.mode==='edit')){toast('Bitte Netto-Betrag eingeben');return}
  const dateChanged=F.mode==='new'||(S.recs[d.id]&&S.recs[d.id].date!==d.date);
- if(!confirmed&&!d.plan&&dateChanged){U.sheet={mode:'form',date:String(d.date).length===10?d.date:d.date+'-01',sum:Calc.val(d,'B')};renderSheet();return}
+ if(!confirmed&&!d.plan&&dateChanged){const sum=Calc.val(d,'B');U.sheet={mode:'form',date:String(d.date).length===10?d.date:d.date+'-01',sum,exp:d.expB!=null?d.expB:sum,editSum:true};renderSheet();return}
  for(const c in d.f)d.f[c]=freeze(d.f[c]);
  if(F.mode==='edit'){S.recs[d.id]=d;save();U.form=null;U.detail=d.id;toast('Gesichert');render();return d.id}
  const ds=d.date.slice(8,10)+'.'+d.date.slice(5,7)+'.'+d.date.slice(0,4);
@@ -396,7 +411,7 @@ function settings(){const st=S.settings,n=all().length;const rk=Object.keys(st.r
  return`<h1>Einstellungen</h1>${resultPanel()}
  <div class="gh">Darstellung</div><div class="segs">${[['auto','Automatisch'],['light','Hell'],['dark','Dunkel']].map(([k,l])=>`<button class="seg ${st.theme===k?'on':''}" data-act="theme" data-v="${k}">${l}</button>`).join('')}</div>
  <div class="group"><label class="cell"><span>Erklärtexte anzeigen</span><input type="checkbox" data-set="hints" ${st.hints!==false?'checked':''} style="flex:0;width:22px;height:22px;accent-color:var(--accent)"></label></div><div class="foot">Blendet die grauen Hilfetexte in der App aus oder ein.</div>
- <div class="gh">Steuern für neue Einträge</div><div class="group"><label class="cell"><span>MwSt.</span><input data-set="mwst" inputmode="decimal" value="${inp(st.mwst)}" style="flex:0 0 70px"><span class="r">%</span></label>
+ <div class="gh">Steuern für neue Einträge</div><div class="group"><label class="cell"><span>MwSt. (Standard)</span><input data-set="mwst" inputmode="decimal" value="${inp(st.mwst)}" style="flex:0 0 70px"><span class="r">%</span></label>
  ${rk.map(k=>{const[s,y]=k.split(':');return`<label class="cell"><span>ESt-Satz ${SR(s).name||s} ${y}</span><input data-rate="${k}" inputmode="decimal" value="${inp(st.rates[k])}" style="flex:0 0 70px"><span class="r">%</span></label>`}).join('')}</div>
  <div class="foot hint">Gilt nur für neue Einträge. Alte Einträge behalten genau die Werte aus deiner Tabelle.</div>
  <div class="gh">Standard-Abzüge</div><div class="group">${kinds.map(([s,sub])=>`<button class="cell" data-act="defs" data-v="${s}|${esc(sub)}"><div class="l">${esc(sub?sub+' · ':'')}${SR(s).name}<small>${Object.keys(st.defaults[dkey(s,sub)]||{}).length?'eigene Werte':'wie letzter Eintrag'}</small></div><span class="chev">›</span></button>`).join('')}</div>
@@ -431,10 +446,10 @@ async function importSetup(code){code=code.trim().replace(/^.*#setup=/,'');const
  if(S.setups.includes(fp)&&all().length){U.result={already:true};return}
  const o=JSON.parse(await inflate(unb64u(code)));const res=importObj(o);if(res){S.setups.push(fp);save();U.result=res;U.year=new Date().getFullYear()}}
 function download(name,text,type){const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}
-function exportBackup(){const o={app:'einkommen',v:7,kind:'backup',created:new Date().toISOString(),tables:S.tables,records:all(),settings:S.settings,setups:S.setups,archive:S.archive||{}};download('einkommen-backup-'+today()+'.json',JSON.stringify(o),'application/json');toast('Backup erstellt')}
+function exportBackup(){const o={app:'einkommen',v:8,kind:'backup',created:new Date().toISOString(),tables:S.tables,records:all(),settings:S.settings,setups:S.setups,archive:S.archive||{}};download('einkommen-backup-'+today()+'.json',JSON.stringify(o),'application/json');toast('Backup erstellt')}
 function exportCSV(){const n=x=>isFinite(x)?(+x.toFixed(2)).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2,useGrouping:false}):'';const q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
- const rows=[['Datum','Quelle','Art','Bezeichnung','Brutto','MwSt','Einkommensteuer','Abzüge','Netto','Status','Nach MwSt','Nach MwSt manuell','Nach MwSt berechnet']];
- for(const r of incs(null,true)){const s=sm(r);rows.push([unknownDay(r)?String(r.date).slice(0,7):r.date,SR(srcOf(r)).name,r.sub||'',r.label,n(s.gross),n(s.mwst),n(s.tax),n(s.ded),n(s.net),r.plan?'Plan':'Ist',...(()=>{const c=Calc.nachMwstCol(r);return c?[n(Calc.val(r,c)),Calc.isOv(r,c)?'ja':'nein',n(Calc.raw(r,c))]:['','','']})()].map((x,i)=>(i>=4&&i<=8)||i===10||i===12?x:q(x)))}
+ const rows=[['Datum','Quelle','Art','Bezeichnung','Netto-Eingabe','MwSt-Satz %','Brutto erwartet','Brutto eingegangen','Brutto','MwSt','Einkommensteuer','Abzüge','Netto','Status','Nach MwSt','Nach MwSt manuell','Nach MwSt berechnet']];
+ for(const r of incs(null,true)){const s=sm(r);rows.push([unknownDay(r)?String(r.date).slice(0,7):r.date,SR(srcOf(r)).name,r.sub||'',r.label,n(r.enteredNet),isFinite(r.vat)?n(r.vat):n(S.settings.mwst),n(r.expB),n(r.gotB),n(s.gross),n(s.mwst),n(s.tax),n(s.ded),n(s.net),r.plan?'Plan':'Ist',...(()=>{const c=Calc.nachMwstCol(r);return c?[n(Calc.val(r,c)),Calc.isOv(r,c)?'ja':'nein',n(Calc.raw(r,c))]:['','','']})()].map((x,i)=>[4,5,6,7,8,9,10,11,12,14,16].includes(i)?x:q(x)))}
  download('einkommen-'+today()+'.csv','\ufeff'+rows.map(r=>r.join(';')).join('\r\n'),'text/csv');toast('CSV erstellt')}
 
 /* ---------- PIN ---------- */
@@ -487,8 +502,10 @@ document.addEventListener('click',async e=>{const p=e.target.closest('[data-pin]
  case'bedit':U.bedit=true;render();break;case'bcancel':U.bedit=false;render();break;
  case'brm':{const r=S.recs[U.bm];applyBudInputs(r);removeLine(r,v);save();render();break}
  case'badd':{const r=S.recs[U.bm];applyBudInputs(r);const{u}=budCols(T(r));addLine(r,u,'Neuer Topf');save();render();const l=[...view.querySelectorAll('[data-bxn]')].pop();if(l){l.focus();l.select()}break}
- case'transfer':{const r=S.recs[id];U.sheet={mode:'plan',id,date:today(),sum:Calc.val(r,'B')};renderSheet();break}
- case'shclose':U.sheet=null;renderSheet();break;case'shcancel':U.sheet.editSum=false;renderSheet();break;case'shedit':U.sheet.editSum=true;renderSheet();break;case'shok':sheetOk();break;
+ case'transfer':{const r=S.recs[id];const sum=Calc.val(r,'B');U.sheet={mode:'plan',id,date:today(),sum,exp:r.expB!=null?r.expB:sum,editSum:true};renderSheet();break}
+ case'gotedit':{const r=S.recs[id];const sum=r.gotB!=null?r.gotB:Calc.val(r,'B');U.sheet={mode:'got',id,date:String(r.date).length===10?r.date:today(),sum,exp:r.expB!=null?r.expB:sum,editSum:true};renderSheet();break}
+ case'fvat':{const F=U.form;if(F&&F.rec&&!(F.rec.f&&F.rec.f.B)){F.rec.vat=+v;syncNetToGross(F.rec);render()}break}
+ case'shclose':U.sheet=null;renderSheet();break;case'shcancel':U.sheet=null;renderSheet();render();break;case'shedit':U.sheet.editSum=true;renderSheet();break;case'shok':sheetOk();break;
  case'checkopen':U.check=id;render();scrollTo(0,0);break;case'checkclose':U.check=null;render();break;
  case'ck':{const r=S.recs[U.check];r.done=r.done||{};if(r.done[v])delete r.done[v];else r.done[v]=true;r.chk=true;save();render();break}
  case'ckall':{const r=S.recs[U.check];r.done={};if(v==='1')checkItems(r).forEach(x=>r.done[x.key]=true);r.chk=true;save();render();break}
@@ -510,7 +527,7 @@ document.addEventListener('click',async e=>{const p=e.target.closest('[data-pin]
  case'closeres':U.result=null;render();break;
  case'pinset':showLock('set');break;case'pinoff':if(confirm('PIN-Sperre ausschalten?')){S.pin=null;save();render()}break;
  case'wipe':if(confirm('Wirklich ALLE Daten auf diesem Gerät löschen? Mach vorher ein Backup.')){localStorage.removeItem(KEY);S=defaults();save();U.year=null;U.result=null;render()}break}});
-view.addEventListener('input',e=>{const t=e.target;if(t.id==='fgross'||t.dataset.col!=null)onFormInput(e);
+view.addEventListener('input',e=>{const t=e.target;if(t.id==='fnetto'||t.id==='fgross'||t.dataset.col!=null)onFormInput(e);
  if(t.dataset.set==='hints'){S.settings.hints=t.checked;save();applyTheme();return}
  if(t.dataset.set==='mwst'){const x=num(t.value);if(isFinite(x)){S.settings.mwst=x;save()}}
  if(t.dataset.rate){const x=num(t.value);if(isFinite(x)){S.settings.rates[t.dataset.rate]=x;save()}}
