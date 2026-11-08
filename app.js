@@ -1,5 +1,5 @@
 'use strict';
-const VERSION='ek-v10',KEY='einkommen-v1';
+const VERSION='ek-v11',KEY='einkommen-v1';
 const $=s=>document.querySelector(s),view=$('#view');
 const EUR=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
 const fm=x=>isFinite(x)?EUR.format(Math.abs(x)<.005?0:x):'—';
@@ -553,6 +553,17 @@ view.addEventListener('touchmove',e=>{if(!SW)return;const dx=e.touches[0].client
 view.addEventListener('touchend',()=>{if(!SW)return;const w=SW.w,c=w.querySelector('.cell');c.style.transition='';c.style.transform='';w.classList.remove('sw');if(SW.lock){if(SW.dx<-40)w.classList.add('open');else if(SW.dx>30)w.classList.remove('open');w.dataset.swiped='1';setTimeout(()=>delete w.dataset.swiped,350)}SW=null});
 $('#file').addEventListener('change',async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;try{const res=importObj(JSON.parse(await f.text()));if(res){U.result=res;U.year=null;render()}}catch(err){alert('Datei konnte nicht geladen werden: '+err.message)}});
 function applyTheme(){document.body.classList.toggle('nohints',S.settings.hints===false);const t=S.settings.theme;if(t==='auto')delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=t}
+
+function lockPageZoom() {
+  const block = e => { if (e.cancelable) e.preventDefault(); };
+  document.addEventListener('gesturestart', block, { passive: false });
+  document.addEventListener('gesturechange', block, { passive: false });
+  document.addEventListener('gestureend', block, { passive: false });
+  document.addEventListener('touchmove', e => {
+    if (e.touches && e.touches.length > 1) block(e);
+  }, { passive: false });
+}
+lockPageZoom();
 
 (async function start(){applyTheme();if(S.pin)showLock('unlock');
  if(/#setup=/.test(location.hash)){const code=location.hash;history.replaceState(null,'',location.pathname+location.search);try{await importSetup(code)}catch(err){U.result=null;alert('Einrichtungslink konnte nicht gelesen werden: '+err.message)}}
