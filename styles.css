@@ -130,3 +130,5 @@ body.nohints .hint{display:none}
 .cell.part .l{font-size:13px;color:var(--sec);padding:5px 0}
 .cell.part .r,.cell.part .r b{font-size:13px;font-weight:500;color:var(--sec)}
 .cell+.cell.part::before{left:48px}
+/* ek-v15: Teile aus Plan oder letzter Einnahme */
+.tag.est{display:inline-block;font-size:10px;font-weight:700;line-height:1.4;color:var(--orange);background:rgba(255,149,0,.16);border-radius:4px;padding:0 5px;margin-left:6px;vertical-align:1px;letter-spacing:0;text-transform:none}
