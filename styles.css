@@ -125,3 +125,8 @@ body.nohints .hint{display:none}
 /* ek-v9 Brutto-Hervorhebung */
 .bruttohero .bigb{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.3px}
 .bruttohero .l small{display:block;margin-top:2px}
+/* ek-v14: Teile des Gehalts unter der Aufteilung */
+.cell.part{min-height:32px;padding-left:48px}
+.cell.part .l{font-size:13px;color:var(--sec);padding:5px 0}
+.cell.part .r,.cell.part .r b{font-size:13px;font-weight:500;color:var(--sec)}
+.cell+.cell.part::before{left:48px}
