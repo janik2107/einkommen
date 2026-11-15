@@ -45,6 +45,7 @@ button{font:inherit;color:var(--text);border:0;border-radius:12px;padding:12px 1
 .navbar{display:flex;justify-content:space-between;align-items:center;margin:4px -6px 0;min-height:44px}.navbar button{background:none;color:var(--accent);padding:8px 6px;font-size:17px}
 .dhead{text-align:center;margin:6px 0 16px}.dhead .t{font-size:15px;color:var(--sec)}.dhead .big{font:700 40px/1.1 -apple-system,"SF Pro Display",system-ui,sans-serif;margin:4px 0;font-variant-numeric:tabular-nums}.dhead h2{font-size:22px;margin:8px 0 2px}
 .wf .cell .r{color:var(--text)}.wf .neg .r{color:var(--red)}.wf .pos .r{color:var(--green)}.wf .subt{background:var(--card2)}.wf .subt .l,.wf .subt .r{font-weight:600}.wf .tot .l,.wf .tot .r{font-weight:700;font-size:18px}.wf .tax .l{color:var(--red)}.wf .tag{font-size:11px;color:var(--sec);margin-left:6px}
+.wf small.est{display:block;margin-top:2px;font-size:12px;font-weight:400;color:var(--sec);letter-spacing:-.01em}
 .warn{background:rgba(255,149,0,.14);color:var(--orange);padding:11px 14px;border-radius:12px;font-size:14px;margin-bottom:12px;line-height:1.35}.warn ul{margin:4px 0 0;padding-left:18px}
 .info{background:var(--tint);color:var(--accent);padding:11px 14px;border-radius:12px;font-size:14px;margin-bottom:12px;line-height:1.35}
 details.group summary{list-style:none;padding:13px 16px;color:var(--accent);cursor:pointer}details.group summary::-webkit-details-marker{display:none}

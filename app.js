@@ -1,5 +1,5 @@
 'use strict';
-const VERSION='ek-v11',KEY='einkommen-v1';
+const VERSION='ek-v12',KEY='einkommen-v1';
 const $=s=>document.querySelector(s),view=$('#view');
 const EUR=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
 const fm=x=>isFinite(x)?EUR.format(Math.abs(x)<.005?0:x):'—';
@@ -169,6 +169,7 @@ function nachMwstRow(r,s,run){const c=Calc.nachMwstCol(r);if(!c)return`<div clas
  <div class="cell subt"><div class="rowbtns" style="width:100%;margin:8px 0"><button data-act="netcancel">Abbrechen</button><button class="primary" style="width:auto;flex:1" data-act="netsave" data-v="${key}">Sichern</button></div></div>`;
  return`<button class="cell subt nm" data-act="netedit" data-v="${key}" aria-label="Betrag nach MwSt. ändern"><div class="l">= Nach MwSt.${man?manBadge:''}</div><div class="r">${fm(run)} ${PEN}</div></button>${man?`<div class="cell subt ovrow"><div class="l"><small>berechnet: ${fm(calc)}<br>Differenz ${run-calc>=0?'+':'−'}${fm(Math.abs(run-calc))}</small></div><button class="link" data-act="netreset" data-v="${key}">Wiederherstellen</button></div>`:''}`}
 function lineKey(r,x){return x.extra?'x:'+x.xid:(x.key.startsWith(r.id+':')?'c:'+x.col:null)}
+function estHint(r,x){if(!x.extra)return'';const rate=Calc.estRate(r);if(rate==null)return'';const ex=(r.extra||[]).find(e=>e.id===x.xid);const cut=Calc.numv(ex&&ex.amount)*rate;if(!(cut>0.004))return'';return `<small class="est">mindert ESt um ${fm(cut)}</small>`}
 function steps(r,s){let run=0,html='';const st=s.steps;const ed=U.wfEdit===r.id;
  st.forEach((x,i)=>{run+=x.amount;if(x.manual)return;const base=i===0;if(!base&&x.col&&r.removed&&x.col in r.removed&&!x.extra)return;
   if(ed&&!base){const k=lineKey(r,x);const own=!!k,isVal=x.extra||(own&&(!r.f[x.col]||isConstF(r.f[x.col])));
@@ -177,7 +178,7 @@ function steps(r,s){let run=0,html='';const st=s.steps;const ed=U.wfEdit===r.id;
    if(Calc.isMwst(x.tlabel)){const nx=st[i+1];html+=`<div class="cell subt"><div class="l">= Nach MwSt.</div><div class="r">${fm(run+(nx&&nx.manual?nx.amount:0))}</div></div>`}return}const lab=base?(x.col==='B'?'Überweisung (brutto)':esc(x.label)):esc(x.label);
   const neg=x.coef<0;const cls=base?'':(neg?'neg':'pos')+(Calc.isTax(x.tlabel)?' tax':'');
   const lk=!base&&neg&&!Calc.isTax(x.tlabel)&&!Calc.isMwst(x.tlabel)&&(x.extra||(x.key.startsWith(r.id+':')&&(!r.f[x.col]||isConstF(r.f[x.col]))))?lineKey(r,x):null;
-  html+=`<div class="cell ${cls}"><div class="l">${base?'':(neg?'− ':'+ ')}${lab}${lk?rhTag(r,lk):''}${Calc.isTax(x.tlabel)?'<span class="tag">Steuer</span>':''}${Calc.isMwst(x.tlabel)?`<span class="tag">${pct(s.gross?(-x.amount)/(s.gross+x.amount)*100:NaN)} auf netto</span>`:''}</div><div class="r">${fm(Math.abs(x.amount))}</div></div>`;
+  html+=`<div class="cell ${cls}"><div class="l">${base?'':(neg?'− ':'+ ')}${lab}${lk?rhTag(r,lk):''}${Calc.isTax(x.tlabel)?'<span class="tag">Steuer</span>':''}${Calc.isMwst(x.tlabel)?`<span class="tag">${pct(s.gross?(-x.amount)/(s.gross+x.amount)*100:NaN)} auf netto</span>`:''}${estHint(r,x)}</div><div class="r">${fm(Math.abs(x.amount))}</div></div>`;
   if(Calc.isMwst(x.tlabel)){const nx=st[i+1];html+=nachMwstRow(r,s,run+(nx&&nx.manual?nx.amount:0))}});
  return html+`<div class="cell tot"><div class="l">= Netto</div><div class="r">${fm(s.net)}</div></div>`}
 function detail(){const r=S.recs[U.detail];if(!r){U.detail=null;return list()}const tb=T(r);if(isInc(r))return detailInc(r,tb);
