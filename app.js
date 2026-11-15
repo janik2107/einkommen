@@ -1,5 +1,5 @@
 'use strict';
-const VERSION='ek-v14',KEY='einkommen-v1';
+const VERSION='ek-v15',KEY='einkommen-v1';
 const $=s=>document.querySelector(s),view=$('#view');
 const EUR=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
 const fm=x=>isFinite(x)?EUR.format(Math.abs(x)<.005?0:x):'—';
@@ -225,44 +225,76 @@ function detailInc(r,tb){const s=sm(r);const ed=U.wfEdit===r.id;
  <div class="group" style="margin-top:22px"><button class="cell btn danger" data-act="del" data-id="${r.id}">Einnahme löschen</button></div>
  <div class="foot hint">Quelle: ${esc(tb.name)}</div>`}
 /* ---------- Abhaken ---------- */
-// Feste Netto-Beträge je Quelle (verlinkte Einnahmen in B, sonst echte Einnahmen desselben Monats).
-// restSrc = die einzige übrige Quelle ohne festes Netto, dieselbe Quelle, die in der Herkunftsrechnung den Rest von B bekommen hätte.
-function budSrcSplit(r){const B=Calc.val(r,'B');if(!isFinite(B)||!(B>0.004))return null;
+// Feste Netto-Beträge je Quelle. restSrc bekommt den Rest des Gehalts (C).
+// Verlinktes B oder echte Einnahmen des Monats wie in ek-v14, solange daraus Teile werden.
+// Fehlen echte Einnahmen (nur Plan, noch keine, oder der Rest wäre 0): Schätzung je Quelle
+// 1) Plan-Einnahme desselben Monats, 2) Netto der letzten Einnahme vor dem Monat. est = geschätzt.
+// Rest-Quelle: die einzige ohne Betrag; sonst die Rest-Quelle des letzten früheren Monats,
+// in dem genau eine Quelle keinen festen Betrag hatte; sonst die Quelle mit dem größten Netto.
+function splitKnown(r){const B=Calc.val(r,'B');if(!isFinite(B)||!(B>0.004))return null;
  const pos=v=>isFinite(v)&&v>0.004;
  const ord=s=>{const i=SRCS.indexOf(s);return i<0?SRCS.length:i};
  const byNet=recs=>{const m=new Map();for(const x of recs){const s=srcOf(x);if(!s)continue;const n=sm(x).net;m.set(s,(m.get(s)||0)+(isFinite(n)?n:0))}return m};
- const pack=(m,restSrc)=>{const fixed=[...m.keys()].sort((a,b)=>ord(a)-ord(b)).filter(s=>pos(m.get(s))).map(s=>({src:s,net:m.get(s)}));return fixed.length||restSrc?{fixed,restSrc}:null};
+ const pack=(m,restSrc)=>{const fixed=[...m.keys()].sort((a,b)=>ord(a)-ord(b)).filter(s=>pos(m.get(s))).map(s=>({src:s,net:m.get(s),est:false}));return fixed.length||restSrc?{fixed,restSrc}:null};
  const refs=linRefs(r,'B').map(x=>S.recs[x.id]).filter(x=>x&&!x.empty);
  if(refs.length){const m=byNet(refs),others=SRCS.filter(s=>!m.has(s));return pack(m,others.length===1?others[0]:null)}
  const month=incs(yr(r)).filter(x=>mo(x)===mo(r)&&!x.plan),m=byNet(month),has=new Set();
  for(const x of month){const s=srcOf(x);if(s)has.add(s)}
  const missing=SRCS.filter(s=>!has.has(s));
  return pack(m,missing.length===1?missing[0]:null)}
+function priorRest(y,mi){const by=new Map();
+ for(const x of incs()){if(x.plan)continue;const yy=yr(x),mm=mo(x);if(!(yy<y||(yy===y&&mm<mi)))continue;const s=srcOf(x);if(!s)continue;const n=sm(x).net;if(!(isFinite(n)&&n>0.004))continue;const k=yy*12+mm;(by.get(k)||by.set(k,new Set()).get(k)).add(s)}
+ for(const k of [...by.keys()].sort((a,b)=>b-a)){const miss=SRCS.filter(s=>!by.get(k).has(s));if(miss.length===1)return miss[0]}
+ return null}
+function splitFallback(r){const B=Calc.val(r,'B');if(!isFinite(B)||!(B>0.004))return null;
+ const pos=v=>isFinite(v)&&v>0.004;
+ const ord=s=>{const i=SRCS.indexOf(s);return i<0?SRCS.length:i};
+ const y=yr(r),mi=mo(r),month=incs().filter(x=>yr(x)===y&&mo(x)===mi);
+ const realRec=month.filter(x=>!x.plan),planRec=month.filter(x=>x.plan);
+ const sumOf=recs=>{const m=new Map();for(const x of recs){const s=srcOf(x);if(!s)continue;const n=sm(x).net;if(!pos(n))continue;m.set(s,(m.get(s)||0)+n)}return m};
+ const real=sumOf(realRec),plan=sumOf(planRec),hasReal=new Set(realRec.map(srcOf).filter(Boolean)),last=new Map();
+ for(const x of incs()){const yy=yr(x),mm=mo(x);if(yy>y||(yy===y&&mm>=mi))continue;const s=srcOf(x);if(!s||hasReal.has(s))continue;const n=sm(x).net;if(pos(n))last.set(s,n)}
+ const cand=new Map();
+ for(const s of SRCS){if(hasReal.has(s)){if(real.has(s))cand.set(s,{net:real.get(s),est:false})}
+  else if(plan.has(s))cand.set(s,{net:plan.get(s),est:true});
+  else if(last.has(s))cand.set(s,{net:last.get(s),est:true})}
+ let rest=null;const none=SRCS.filter(s=>!cand.has(s));
+ if(none.length===1)rest=none[0];else rest=priorRest(y,mi);
+ if(!rest){let best=null,bn=-1;for(const s of SRCS){const n=(cand.get(s)||{}).net||0;if(n>bn+0.004||(best&&Math.abs(n-bn)<=0.004&&ord(s)>ord(best))){best=s;bn=n}}if(bn>0.004)rest=best}
+ if(rest)cand.delete(rest);
+ const fixed=[...cand.entries()].sort((a,b)=>ord(a[0])-ord(b[0])).map(([src,v])=>({src,net:v.net,est:!!v.est}));
+ return fixed.length||rest?{fixed,restSrc:rest||null}:null}
+function allocParts(C,split){if(!split||!isFinite(C)||!(C>0.004))return [];
+ const ord=s=>{const i=SRCS.indexOf(s);return i<0?SRCS.length:i};
+ let rem=C;const map=new Map();
+ for(const{src,net,est}of split.fixed){const take=Math.min(net,rem>0?rem:0);if(take>0.004)map.set(src,{amount:take,est:!!est});rem-=take}
+ if(rem>0.004){let dest=split.restSrc;
+  if(!dest){const keys=[...map.keys()];if(!keys.length)return [];dest=keys[0];
+   for(const s of keys){const a=map.get(s).amount,b=map.get(dest).amount;if(a>b+0.004||(Math.abs(a-b)<=0.004&&ord(s)>ord(dest)))dest=s}}
+  const prev=map.get(dest);map.set(dest,{amount:(prev?prev.amount:0)+rem,est:prev?prev.est:false})}
+ let parts=[...map.entries()].filter(([,v])=>v.amount>0.004).map(([src,v])=>({src,amount:v.amount,est:!!v.est}));
+ parts.sort((a,b)=>ord(a.src)-ord(b.src));if(parts.length<2)return [];
+ parts[parts.length-1].amount+=C-parts.reduce((a,p)=>a+p.amount,0);
+ return parts.every(p=>p.amount>0.004)?parts:[]}
+function budSrcSplit(r){const known=splitKnown(r);
+ if(linRefs(r,'B').some(x=>S.recs[x.id]&&!S.recs[x.id].empty))return known;
+ if(known&&allocParts(Calc.val(r,'C'),known).length>=2)return known;
+ return splitFallback(r)||known}
 // Gehalt (C) an der Stelle der einen Zeile in Teile je Quelle. Summe exakt C. null = normale Zeile 'c:C'.
 function salaryParts(r){if(SRCS.length<2||(r.removed&&'C' in r.removed))return null;
  const C=Calc.val(r,'C');if(!isFinite(C)||!(C>0.004))return null;const split=budSrcSplit(r);if(!split)return null;
- const ord=s=>{const i=SRCS.indexOf(s);return i<0?SRCS.length:i};
- let rem=C;const map=new Map();
- for(const{src,net}of split.fixed){const take=Math.min(net,rem>0?rem:0);if(take>0.004)map.set(src,take);rem-=take}
- if(rem>0.004){let dest=split.restSrc;
-  if(!dest){const keys=[...map.keys()];if(!keys.length)return null;dest=keys[0];
-   for(const s of keys){const a=map.get(s),b=map.get(dest);if(a>b+0.004||(Math.abs(a-b)<=0.004&&ord(s)>ord(dest)))dest=s}}
-  map.set(dest,(map.get(dest)||0)+rem)}
- let parts=[...map.entries()].filter(([,v])=>v>0.004).map(([src,amount])=>({src,amount}));
- parts.sort((a,b)=>ord(a.src)-ord(b.src));if(parts.length<2)return null;
- parts[parts.length-1].amount+=C-parts.reduce((a,p)=>a+p.amount,0);
- return parts.every(p=>p.amount>0.004)?parts:null}
+ const parts=allocParts(C,split);return parts.length?parts:null}
 function checkItems(r){if(isInc(r)){const s=sm(r);return s.steps.slice(1).filter(x=>!x.manual&&x.amount<-0.004&&!(x.col&&!x.extra&&r.removed&&x.col in r.removed)).map(x=>{const k=lineKey(r,x);const isv=k&&(x.extra||!r.f[x.col]||isConstF(r.f[x.col]));return{key:k||x.key,name:x.label,tag:Calc.isMwst(x.tlabel)?'ans Finanzamt':Calc.isTax(x.tlabel)?'Steuer-Rücklage':isv?rhInfo(r,k):'',amount:-x.amount}})}
- if(isBud(r)){const tb=T(r),{b}=budCols(tb);const L=[];const add=(k,n,v,tag)=>{if(isFinite(v)&&v>0.004)L.push({key:k,name:n,amount:v,tag:tag||''})};
+ if(isBud(r)){const tb=T(r),{b}=budCols(tb);const L=[];const add=(k,n,v,tag,est)=>{if(isFinite(v)&&v>0.004)L.push({key:k,name:n,amount:v,tag:tag||'',est:!!est})};
   const parts=salaryParts(r);
-  if(parts)parts.forEach(p=>add('c:C:'+p.src,'Teil '+SR(p.src).name,p.amount,rl(r,'C')));
+  if(parts)parts.forEach(p=>add('c:C:'+p.src,'Teil '+SR(p.src).name,p.amount,rl(r,'C'),p.est));
   else if(!(r.removed&&'C' in r.removed))add('c:C',rl(r,'C'),Calc.val(r,'C'));
   b.forEach(([c,l])=>{if(!(r.removed&&c in r.removed))add('c:'+c,rl(r,c,l),Calc.val(r,c))});(r.extra||[]).forEach(x=>add('x:'+x.id,x.name,Calc.numv(x.amount)));return L}return[]}
 // Altes 'c:C' gilt für alle Teile, bis eines umgeschaltet wird. Keys 'n:' aus ek-v13 bleiben ungelesen.
 function itemDone(r,x){return !!(r.done&&(r.done[x.key]||(String(x.key).startsWith('c:C:')&&r.done['c:C'])))}
 function openCount(r){if(!r.chk||r.plan)return 0;return checkItems(r).filter(x=>!itemDone(r,x)).length}
 function checklist(){const r=S.recs[U.check],it=checkItems(r),bud=isBud(r);const dn=x=>itemDone(r,x);const done=it.filter(dn).length,open=it.filter(x=>!dn(x)).reduce((a,x)=>a+x.amount,0);
- const row=x=>`<button class="cell ckrow ${dn(x)?'done':''}" data-act="ck" data-v="${esc(x.key)}"><span class="cbox">${dn(x)?'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>':''}</span><div class="l">${esc(x.name)}${x.tag?`<small>${x.tag}</small>`:''}</div><div class="r"><b>${fm(x.amount)}</b></div></button>`;
+ const row=x=>`<button class="cell ckrow ${dn(x)?'done':''}" data-act="ck" data-v="${esc(x.key)}"><span class="cbox">${dn(x)?'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>':''}</span><div class="l">${esc(x.name)}${x.est?'<span class="tag est">geschätzt</span>':''}${x.tag?`<small>${x.tag}</small>`:''}</div><div class="r"><b>${fm(x.amount)}</b></div></button>`;
  return`<div class="navbar"><button data-act="checkclose">‹ Zurück</button></div><h1 style="margin-top:2px">${bud?'Verteilung abhaken':'Ausgaben überweisen'}</h1>
  ${!bud&&r.gotB!=null?`<div class="card gotbox"><div class="gotl">Eingegangen <b>${fm(r.gotB)}</b>${r.expB!=null&&Math.abs(r.gotB-r.expB)>0.004?` <span class="badge man">statt ${fm(r.expB)}</span>`:''}</div><button class="link" data-act="gotedit" data-id="${r.id}">Betrag ändern</button></div>`:''}
  <div class="card"><div class="hero"><div class="lbl">${bud?MON[mo(r)]+' '+yr(r):esc(title(r))+' · '+dtext(r)}</div><div class="big">${done} von ${it.length}</div><div class="sub">erledigt${open>0.004?' · noch offen '+fm(open):' · alles erledigt'}</div></div><div class="bar"><i style="width:${it.length?done/it.length*100:0}%"></i></div></div>
@@ -431,7 +463,7 @@ function budget(){const AB=allBuds();if(!AB.length)return`<h1>Verteilung</h1><di
  <div class="card"><div class="hero"><div class="lbl">Netto Gesamt</div><div class="big">${fm(B)}</div><div class="sub">${refs.length?`aus ${refs.length} Einnahme${refs.length>1?'n':''}`:''}${D?` · + ${fm(D)} übrige MwSt.`:''}</div></div>
  ${segs.length?`<div class="donutwrap" style="margin-top:14px">${donut(segs)}<div><div class="lbl" style="color:var(--sec);font-size:13px;font-weight:600">ÜBRIG</div><div style="font-size:26px;font-weight:700" class="num ${ub<0?'down':'up'}">${fm(ub)}</div><div class="sub" style="color:var(--sec);font-size:14px">${isFinite(B)&&B?pct(ub/B*100)+' vom Netto':''}</div></div></div>`:''}</div>
  ${E&&isFinite(E)?`<div class="info">Gehalt fehlend: ${fm(E)} – so viel fehlt noch bis zum Gehalt von ${fm(Cg)}.</div>`:''}
- <div class="gh"><span>Aufteilung</span><button class="link" data-act="bedit" style="font-size:13px;padding:0;text-transform:none">Bearbeiten</button></div><div class="group">${segs.map(s=>`<div class="cell"><div class="l"><i class="dotc" style="background:${s.col};margin-right:8px"></i>${esc(s.n)}</div><div class="r"><b>${fm(s.v)}</b> · ${pct(st?s.v/st*100:NaN)}</div></div>${s.k==='C'?(salaryParts(r)||[]).map(p=>`<div class="cell part"><div class="l">Teil ${esc(SR(p.src).name)}</div><div class="r"><b>${fm(p.amount)}</b></div></div>`).join(''):''}`).join('')||'<div class="cell"><div class="l" style="color:var(--sec)">Nichts verteilt.</div></div>'}${ub<0?`<div class="cell"><div class="l down">Übrig (negativ)</div><div class="r down">${fm(ub)}</div></div>`:''}</div>
+ <div class="gh"><span>Aufteilung</span><button class="link" data-act="bedit" style="font-size:13px;padding:0;text-transform:none">Bearbeiten</button></div><div class="group">${segs.map(s=>`<div class="cell"><div class="l"><i class="dotc" style="background:${s.col};margin-right:8px"></i>${esc(s.n)}</div><div class="r"><b>${fm(s.v)}</b> · ${pct(st?s.v/st*100:NaN)}</div></div>${s.k==='C'?(salaryParts(r)||[]).map(p=>`<div class="cell part"><div class="l">Teil ${esc(SR(p.src).name)}${p.est?'<span class="tag est">geschätzt</span>':''}</div><div class="r"><b>${fm(p.amount)}</b></div></div>`).join(''):''}`).join('')||'<div class="cell"><div class="l" style="color:var(--sec)">Nichts verteilt.</div></div>'}${ub<0?`<div class="cell"><div class="l down">Übrig (negativ)</div><div class="r down">${fm(ub)}</div></div>`:''}</div>
  ${(()=>{const it=checkItems(r),d=it.filter(x=>itemDone(r,x)).length;return`<div class="group ic" style="margin-top:10px"><button class="cell" data-act="checkopen" data-id="${r.id}"><span class="av ck ${it.length&&d===it.length?'all':''}">✓</span><div class="l">Verteilung abhaken<small>${d} von ${it.length} erledigt</small></div><span class="chev">›</span></button></div>`})()}${note?textBlock(r,note,rl(r,note,'Bemerkung')):''}${notesBlock(r)}
  ${refs.length?`<div class="gh">Netto kommt aus</div><div class="group ic">${refs.map(x=>`<button class="cell" data-act="open" data-id="${x.id}"><span class="av ${SR(srcOf(x)).cls}">${SR(srcOf(x)).l}</span><div class="l">${esc(title(x))}${x.plan?'<span class="badge">Plan</span>':''}<small>${dtext(x)}</small></div><div class="r"><b>${fm(sm(x).net)}</b></div><span class="chev">›</span></button>`).join('')}</div>`:''}
  <div class="gh">${anyPlan?'Plan vs. Ist':'Summe'} ${y}</div><div class="group"><div class="pvi h"><span>Topf</span><span>Ist</span><span>${anyPlan?'Plan':''}</span></div>
