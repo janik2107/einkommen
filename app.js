@@ -1,5 +1,5 @@
 'use strict';
-const VERSION='ek-v12',KEY='einkommen-v1';
+const VERSION='ek-v13',KEY='einkommen-v1';
 const $=s=>document.querySelector(s),view=$('#view');
 const EUR=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
 const fm=x=>isFinite(x)?EUR.format(Math.abs(x)<.005?0:x):'—';
@@ -225,15 +225,41 @@ function detailInc(r,tb){const s=sm(r);const ed=U.wfEdit===r.id;
  <div class="group" style="margin-top:22px"><button class="cell btn danger" data-act="del" data-id="${r.id}">Einnahme löschen</button></div>
  <div class="foot hint">Quelle: ${esc(tb.name)}</div>`}
 /* ---------- Abhaken ---------- */
+// Nur fürs Abhaken: woraus sich Netto Gesamt (B) zusammensetzt. Speichert nichts und ändert keine Beträge.
+function budNetItems(r){const B=Calc.val(r,'B');if(!isFinite(B)||!(B>0.004))return[];
+ const pos=v=>isFinite(v)&&v>0.004;
+ const line=(src,amount)=>({key:'n:'+src,name:SR(src).name+' Netto',amount,tag:'',grp:'in'});
+ const restLine=(name,amount)=>({key:'n:rest',name,amount,tag:'',grp:'in'});
+ const ord=s=>{const i=SRCS.indexOf(s);return i<0?SRCS.length:i};
+ const byNet=recs=>{const m=new Map();for(const x of recs){const s=srcOf(x);if(!s)continue;const n=sm(x).net;m.set(s,(m.get(s)||0)+(isFinite(n)?n:0))}return m};
+ const refs=linRefs(r,'B').map(x=>S.recs[x.id]).filter(x=>x&&!x.empty);
+ if(refs.length){const m=byNet(refs),items=[];let sum=0;
+  for(const s of [...m.keys()].sort((a,b)=>ord(a)-ord(b))){const v=m.get(s);if(pos(v)){items.push(line(s,v));sum+=v}}
+  const rest=B-sum;if(rest>0.004){const linked=new Set(m.keys()),others=SRCS.filter(s=>!linked.has(s));
+   items.push(restLine(others.length===1?SR(others[0]).name+' Netto':'Rest Netto',rest))}
+  return items}
+ const month=incs(yr(r)).filter(x=>mo(x)===mo(r)&&!x.plan),m=byNet(month),has=new Set();
+ for(const x of month){const s=srcOf(x);if(s)has.add(s)}
+ const items=[];let sum=0;
+ for(const s of [...m.keys()].sort((a,b)=>ord(a)-ord(b))){const v=m.get(s);if(pos(v)){items.push(line(s,v));sum+=v}}
+ const rest=B-sum;
+ if(rest>0.004){const missing=SRCS.filter(s=>!has.has(s));
+  if(missing.length===1)items.push(line(missing[0],rest));
+  else if(items.length){let bi=0;for(let i=1;i<items.length;i++)if(items[i].amount>items[bi].amount)bi=i;items[bi]={...items[bi],amount:items[bi].amount+rest}}
+  else items.push(restLine('Rest Netto',rest))}
+ return items}
 function checkItems(r){if(isInc(r)){const s=sm(r);return s.steps.slice(1).filter(x=>!x.manual&&x.amount<-0.004&&!(x.col&&!x.extra&&r.removed&&x.col in r.removed)).map(x=>{const k=lineKey(r,x);const isv=k&&(x.extra||!r.f[x.col]||isConstF(r.f[x.col]));return{key:k||x.key,name:x.label,tag:Calc.isMwst(x.tlabel)?'ans Finanzamt':Calc.isTax(x.tlabel)?'Steuer-Rücklage':isv?rhInfo(r,k):'',amount:-x.amount}})}
  if(isBud(r)){const tb=T(r),{b}=budCols(tb);const L=[];const add=(k,n,v)=>{if(isFinite(v)&&v>0.004)L.push({key:k,name:n,amount:v,tag:''})};
-  if(!(r.removed&&'C' in r.removed))add('c:C',rl(r,'C'),Calc.val(r,'C'));b.forEach(([c,l])=>{if(!(r.removed&&c in r.removed))add('c:'+c,rl(r,c,l),Calc.val(r,c))});(r.extra||[]).forEach(x=>add('x:'+x.id,x.name,Calc.numv(x.amount)));return L}return[]}
+  if(!(r.removed&&'C' in r.removed))add('c:C',rl(r,'C'),Calc.val(r,'C'));b.forEach(([c,l])=>{if(!(r.removed&&c in r.removed))add('c:'+c,rl(r,c,l),Calc.val(r,c))});(r.extra||[]).forEach(x=>add('x:'+x.id,x.name,Calc.numv(x.amount)));return budNetItems(r).concat(L)}return[]}
 function openCount(r){if(!r.chk||r.plan)return 0;return checkItems(r).filter(x=>!(r.done&&r.done[x.key])).length}
 function checklist(){const r=S.recs[U.check],it=checkItems(r),bud=isBud(r);const dn=x=>!!(r.done&&r.done[x.key]);const done=it.filter(dn).length,open=it.filter(x=>!dn(x)).reduce((a,x)=>a+x.amount,0);
+ const row=x=>`<button class="cell ckrow ${dn(x)?'done':''}" data-act="ck" data-v="${esc(x.key)}"><span class="cbox">${dn(x)?'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>':''}</span><div class="l">${esc(x.name)}${x.tag?`<small>${x.tag}</small>`:''}</div><div class="r"><b>${fm(x.amount)}</b></div></button>`;
+ const grp=list=>`<div class="group ic">${list.map(row).join('')||'<div class="cell"><div class="l" style="color:var(--sec)">Keine Posten.</div></div>'}</div>`;
+ const body=bud?`${(it.some(x=>x.grp==='in')?`<div class="gh">Netto eingegangen</div>${grp(it.filter(x=>x.grp==='in'))}`:'')}<div class="gh">Verteilt</div>${grp(it.filter(x=>x.grp!=='in'))}`:grp(it);
  return`<div class="navbar"><button data-act="checkclose">‹ Zurück</button></div><h1 style="margin-top:2px">${bud?'Verteilung abhaken':'Ausgaben überweisen'}</h1>
  ${!bud&&r.gotB!=null?`<div class="card gotbox"><div class="gotl">Eingegangen <b>${fm(r.gotB)}</b>${r.expB!=null&&Math.abs(r.gotB-r.expB)>0.004?` <span class="badge man">statt ${fm(r.expB)}</span>`:''}</div><button class="link" data-act="gotedit" data-id="${r.id}">Betrag ändern</button></div>`:''}
  <div class="card"><div class="hero"><div class="lbl">${bud?MON[mo(r)]+' '+yr(r):esc(title(r))+' · '+dtext(r)}</div><div class="big">${done} von ${it.length}</div><div class="sub">erledigt${open>0.004?' · noch offen '+fm(open):' · alles erledigt'}</div></div><div class="bar"><i style="width:${it.length?done/it.length*100:0}%"></i></div></div>
- <div class="group ic">${it.map(x=>`<button class="cell ckrow ${dn(x)?'done':''}" data-act="ck" data-v="${esc(x.key)}"><span class="cbox">${dn(x)?'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>':''}</span><div class="l">${esc(x.name)}${x.tag?`<small>${x.tag}</small>`:''}</div><div class="r"><b>${fm(x.amount)}</b></div></button>`).join('')||'<div class="cell"><div class="l" style="color:var(--sec)">Keine Posten.</div></div>'}</div>
+ ${body}
  <div class="rowbtns"><button data-act="ckall" data-v="0">Alle zurücksetzen</button><button class="tinted" data-act="ckall" data-v="1">Alle abhaken</button></div>
  <div class="foot hint">Tippe einen Posten an, wenn du ihn überwiesen hast. Der Stand wird gespeichert.</div>`}
 /* ---------- Überweisung prüfen (Sheet) ---------- */
