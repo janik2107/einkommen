@@ -28,22 +28,43 @@ function val(rec,c){if(!rec)return 0;const o=rec.ov&&rec.ov[c];if(o!=null&&o!=='
 function isOv(rec,c){const o=rec&&rec.ov&&rec.ov[c];return o!=null&&o!==''&&isFinite(o)}
 function raw(rec,c){if(!rec)return 0;const k=rec.id+':'+c;if(cache.has(k))return cache.get(k);cache.set(k,0);let v;
  const f=rec.f&&rec.f[c];if(f){if(f==='#REF!')v=rec.v&&typeof rec.v[c]==='number'?rec.v[c]:NaN;else{try{v=ev(rec,parse(f))}catch(e){v=NaN}}}else v=numv(rec.v&&rec.v[c]);
+ // Eigene Posten auf der Netto-Spalte mindern die Haupt-ESt um Summe(Betrag)×Satz. Kein Feld, keine Speicherung.
+ v=applyEstCut(rec,c,v);
  // eigene Posten (rec.extra) werden von der Zielspalte rec.xcol abgezogen (Netto bzw. Übrig)
  if(rec.extra&&rec.extra.length&&c===rec.xcol)for(const x of rec.extra)v-=numv(x.amount);
  cache.set(k,v);return v}
+// Rechenweg ohne Werte (kein val/raw): gleiche Zerlegung wie waterfall
+function expandTerms(rec,netCol,deep){let terms=[[rec.id+':'+netCol,1]];
+ for(let guard=0;guard<(deep?12:1);guard++){const bi=terms.findIndex(([k,c])=>k[0]!=='#'&&k[0]!=='@'&&c>0);if(bi<0)break;const[k,c]=terms[bi];const[id,col]=[k.slice(0,k.lastIndexOf(':')),k.slice(k.lastIndexOf(':')+1)];
+  const r=DB.recs[id],f=r&&r.f&&r.f[col];if(!f||f==='#REF!')break;const out=[];if(!linear(r,parse(f),c,out))break;
+  if(isOv(r,col)){const mi=out.findIndex(t=>t[0]!=='#'&&t[1]<0);out.splice(mi<0?out.length:mi+1,0,['@'+k,c])}
+  terms.splice(bi,1,...out);
+  const m=new Map();for(const[kk,cc]of terms)m.set(kk==='#'?'#'+m.size:kk,(m.get(kk)||0)+cc);terms=[...m.entries()].filter(([,cc])=>Math.abs(cc)>1e-12).map(([kk,cc])=>[kk.startsWith('#')?'#':kk,cc]);
+  const fx=terms.filter(t=>t[0]==='#').reduce((s,t)=>s+t[1],0);terms=terms.filter(t=>t[0]!=='#');if(Math.abs(fx)>1e-12)terms.push(['#',fx])}
+ return terms}
+// Erste Spalte im Netto-Rechenweg, deren Tabellenlabel mit ESt beginnt (nicht Steuerdiff)
+function mainEstCol(rec){const tb=DB&&DB.tables&&DB.tables[rec.t];if(!tb)return null;const net=rec.net||tb.net;if(!net)return null;let terms;try{terms=expandTerms(rec,net,true)}catch(e){return null}
+ for(const[k]of terms){if(!k||k[0]==='#'||k[0]==='@')continue;const i=k.lastIndexOf(':');const id=k.slice(0,i),col=k.slice(i+1);if(id!==rec.id)continue;
+  const lab=((tb.cols||[]).find(x=>x[0]===col)||[])[1];if(/^ESt/i.test(String(lab||'').trim()))return col}return null}
+// Satz = rechter Operand eines Top-Level-*: Zahl oder [$rate:…]. Sonst null (keine Minderung).
+function taxRate(rec,col){const f=rec.f&&rec.f[col];if(!f||f==='#REF!')return null;let a;try{a=parse(f)}catch(e){return null}
+ if(!a||a.o!=='*'||!a.b)return null;const b=a.b;
+ if(b.n!=null)return isFinite(b.n)?b.n:null;
+ if(b.r&&b.r[0]==='$'){const k=b.r.slice(1);if(!k.startsWith('rate:'))return null;const rate=setting(k);return isFinite(rate)?rate:null}
+ return null}
+// Satz der Haupt-ESt, nur bei Einkommens-Eintrag mit Posten auf der Netto-Spalte und ohne manuelle ESt-Überschreibung
+function estInfo(rec){if(!rec||!rec.extra||!rec.extra.length||!DB||!DB.tables)return null;const tb=DB.tables[rec.t];if(!tb||tb.kind!=='inc')return null;
+ const net=rec.net||tb.net;if(!net||rec.xcol!==net)return null;const col=mainEstCol(rec);if(!col||isOv(rec,col))return null;
+ const rate=taxRate(rec,col);if(rate==null||!isFinite(rate))return null;return{col,rate}}
+function estRate(rec){const i=estInfo(rec);return i?i.rate:null}
+function applyEstCut(rec,c,v){if(!isFinite(v))return v;const i=estInfo(rec);if(!i||i.col!==c)return v;
+ let sum=0;for(const x of rec.extra)sum+=numv(x.amount);if(!sum)return v;const n=v-sum*i.rate;return n<0?0:n}
 // Lineare Zerlegung (nur + und -): {key:coef}, sonst null
 function linear(rec,a,coef,out){if(a.n!=null){out.push(['#',a.n*coef]);return true}
  if(a.r){const t=refTarget(rec,a.r);if(t.setting)return false;out.push([t.id+':'+t.c,coef]);return true}
  if(a.o==='neg')return linear(rec,a.a,-coef,out);if(a.o==='+'||a.o==='-')return linear(rec,a.a,coef,out)&&linear(rec,a.b,a.o==='+'?coef:-coef,out);return false}
 // Rechenweg der Netto-Spalte: Basis (meist Überweisung) und alle Zu-/Abzüge in Tabellen-Reihenfolge
-function waterfall(rec,netCol,deep=true){let terms=[[rec.id+':'+netCol,1]];
- for(let guard=0;guard<(deep?12:1);guard++){const bi=terms.findIndex(([k,c])=>k[0]!=='#'&&k[0]!=='@'&&c>0);if(bi<0)break;const[k,c]=terms[bi];const[id,col]=[k.slice(0,k.lastIndexOf(':')),k.slice(k.lastIndexOf(':')+1)];
-  const r=DB.recs[id],f=r&&r.f&&r.f[col];if(!f||f==='#REF!')break;const out=[];if(!linear(r,parse(f),c,out))break;
-  // Manuell überschriebene Zwischensumme (z. B. „Nach MwSt.“): Rechnung zeigen + Korrektur-Zeile, damit die Summe stimmt
-  if(isOv(r,col)){const mi=out.findIndex(t=>t[0]!=='#'&&t[1]<0);out.splice(mi<0?out.length:mi+1,0,['@'+k,c])}
-  terms.splice(bi,1,...out);
-  const m=new Map();for(const[kk,cc]of terms)m.set(kk==='#'?'#'+m.size:kk,(m.get(kk)||0)+cc);terms=[...m.entries()].filter(([kk,cc])=>Math.abs(cc)>1e-12).map(([kk,cc])=>[kk.startsWith('#')?'#':kk,cc]);
-  const fx=terms.filter(t=>t[0]==='#').reduce((s,t)=>s+t[1],0);terms=terms.filter(t=>t[0]!=='#');if(Math.abs(fx)>1e-12)terms.push(['#',fx])}
+function waterfall(rec,netCol,deep=true){const terms=expandTerms(rec,netCol,deep);
  const ownLab=(r,col,lab)=>(r.lbl&&r.lbl[col])||lab;
  const out2=terms.map(([k,c])=>{if(k[0]==='@'){const kk=k.slice(1),i=kk.lastIndexOf(':'),id=kk.slice(0,i),col=kk.slice(i+1),r=DB.recs[id],tb=DB.tables[r.t];const lab=(tb.cols.find(x=>x[0]===col)||[,col])[1]||col;
    return{key:k,col,label:'Korrektur '+lab.trim()+' (manuell)',tlabel:'Korrektur',coef:c,amount:c*(val(r,col)-raw(r,col)),manual:true,adjOf:col,ovValue:val(r,col),calcValue:raw(r,col)}}
@@ -61,5 +82,5 @@ function incomeSummary(rec){const tb=DB.tables[rec.t],nc=rec.net||tb.net;const n
  return{gross,mwst,tax,ded,adj,net,manual,steps:w}}
 // Spalte „Nach MwSt.“ (Zwischensumme nach MwSt.), falls die Tabelle eine hat
 function nachMwstCol(rec){const tb=DB.tables[rec.t];const c=(tb.cols||[]).find(([k,l])=>/^Nach MwSt/i.test(String(l).trim()));return c&&rec.f&&rec.f[c[0]]?c[0]:null}
-G.Calc={setDB,clear,val,raw,isOv,nachMwstCol,waterfall,incomeSummary,parse,isTax,isMwst,numv};
+G.Calc={setDB,clear,val,raw,isOv,nachMwstCol,waterfall,incomeSummary,parse,isTax,isMwst,numv,estRate};
 })(typeof window!=='undefined'?window:globalThis);
