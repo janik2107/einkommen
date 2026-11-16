@@ -1,5 +1,5 @@
 'use strict';
-const VERSION='ek-v15',KEY='einkommen-v1';
+const VERSION='ek-v16',KEY='einkommen-v1';
 const $=s=>document.querySelector(s),view=$('#view');
 const EUR=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
 const fm=x=>isFinite(x)?EUR.format(Math.abs(x)<.005?0:x):'—';
@@ -235,7 +235,8 @@ function splitKnown(r){const B=Calc.val(r,'B');if(!isFinite(B)||!(B>0.004))retur
  const pos=v=>isFinite(v)&&v>0.004;
  const ord=s=>{const i=SRCS.indexOf(s);return i<0?SRCS.length:i};
  const byNet=recs=>{const m=new Map();for(const x of recs){const s=srcOf(x);if(!s)continue;const n=sm(x).net;m.set(s,(m.get(s)||0)+(isFinite(n)?n:0))}return m};
- const pack=(m,restSrc)=>{const fixed=[...m.keys()].sort((a,b)=>ord(a)-ord(b)).filter(s=>pos(m.get(s))).map(s=>({src:s,net:m.get(s),est:false}));return fixed.length||restSrc?{fixed,restSrc}:null};
+ const pack=(m,restSrc)=>{if(!restSrc){const none=SRCS.filter(s=>!pos(m.get(s)));if(none.length===1)restSrc=none[0];else if(!none.length){let best=null,bn=-1;for(const s of SRCS){const n=m.get(s)||0;if(n>bn+0.004){best=s;bn=n}}restSrc=best}}
+  const fixed=[...m.keys()].sort((a,b)=>ord(a)-ord(b)).filter(s=>s!==restSrc&&pos(m.get(s))).map(s=>({src:s,net:m.get(s),est:false}));return fixed.length||restSrc?{fixed,restSrc}:null};
  const refs=linRefs(r,'B').map(x=>S.recs[x.id]).filter(x=>x&&!x.empty);
  if(refs.length){const m=byNet(refs),others=SRCS.filter(s=>!m.has(s));return pack(m,others.length===1?others[0]:null)}
  const month=incs(yr(r)).filter(x=>mo(x)===mo(r)&&!x.plan),m=byNet(month),has=new Set();
