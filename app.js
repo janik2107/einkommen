@@ -1,5 +1,5 @@
 'use strict';
-const VERSION='ek-v16',KEY='einkommen-v1';
+const VERSION='ek-v17',KEY='einkommen-v1';
 const $=s=>document.querySelector(s),view=$('#view');
 const EUR=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
 const fm=x=>isFinite(x)?EUR.format(Math.abs(x)<.005?0:x):'—';
@@ -178,7 +178,8 @@ function steps(r,s){let run=0,html='';const st=s.steps;const ed=U.wfEdit===r.id;
    if(Calc.isMwst(x.tlabel)){const nx=st[i+1];html+=`<div class="cell subt"><div class="l">= Nach MwSt.</div><div class="r">${fm(run+(nx&&nx.manual?nx.amount:0))}</div></div>`}return}const lab=base?(x.col==='B'?'Überweisung (brutto)':esc(x.label)):esc(x.label);
   const neg=x.coef<0;const cls=base?'':(neg?'neg':'pos')+(Calc.isTax(x.tlabel)?' tax':'');
   const lk=!base&&neg&&!Calc.isTax(x.tlabel)&&!Calc.isMwst(x.tlabel)&&(x.extra||(x.key.startsWith(r.id+':')&&(!r.f[x.col]||isConstF(r.f[x.col]))))?lineKey(r,x):null;
-  html+=`<div class="cell ${cls}"><div class="l">${base?'':(neg?'− ':'+ ')}${lab}${lk?rhTag(r,lk):''}${Calc.isTax(x.tlabel)?'<span class="tag">Steuer</span>':''}${Calc.isMwst(x.tlabel)?`<span class="tag">${pct(s.gross?(-x.amount)/(s.gross+x.amount)*100:NaN)} auf netto</span>`:''}${estHint(r,x)}</div><div class="r">${fm(Math.abs(x.amount))}</div></div>`;
+  const dk=base?null:(lineKey(r,x)||x.key),isDone=!!(dk&&r.done&&r.done[dk]);
+  html+=`<div class="cell ${cls}${isDone?' done':''}"><div class="l">${base?'':(neg?'− ':'+ ')}${lab}${lk?rhTag(r,lk):''}${Calc.isTax(x.tlabel)?'<span class="tag">Steuer</span>':''}${Calc.isMwst(x.tlabel)?`<span class="tag">${pct(s.gross?(-x.amount)/(s.gross+x.amount)*100:NaN)} auf netto</span>`:''}${estHint(r,x)}</div><div class="r">${fm(Math.abs(x.amount))}</div></div>`;
   if(Calc.isMwst(x.tlabel)){const nx=st[i+1];html+=nachMwstRow(r,s,run+(nx&&nx.manual?nx.amount:0))}});
  return html+`<div class="cell tot"><div class="l">= Netto</div><div class="r">${fm(s.net)}</div></div>`}
 function detail(){const r=S.recs[U.detail];if(!r){U.detail=null;return list()}const tb=T(r);if(isInc(r))return detailInc(r,tb);
@@ -293,6 +294,10 @@ function checkItems(r){if(isInc(r)){const s=sm(r);return s.steps.slice(1).filter
   b.forEach(([c,l])=>{if(!(r.removed&&c in r.removed))add('c:'+c,rl(r,c,l),Calc.val(r,c))});(r.extra||[]).forEach(x=>add('x:'+x.id,x.name,Calc.numv(x.amount)));return L}return[]}
 // Altes 'c:C' gilt für alle Teile, bis eines umgeschaltet wird. Keys 'n:' aus ek-v13 bleiben ungelesen.
 function itemDone(r,x){return !!(r.done&&(r.done[x.key]||(String(x.key).startsWith('c:C:')&&r.done['c:C'])))}
+// Aufteilungs-Zeile abgehakt? C gilt als erledigt, wenn alle Gehaltsteile abgehakt sind.
+function segDone(r,k){if(!r.done||k==='#')return false;const key=k.startsWith('x:')?k:'c:'+k;
+ if(k==='C'){const parts=salaryParts(r);if(parts)return parts.every(p=>itemDone(r,{key:'c:C:'+p.src}))}
+ return !!r.done[key]}
 function openCount(r){if(!r.chk||r.plan)return 0;return checkItems(r).filter(x=>!itemDone(r,x)).length}
 function checklist(){const r=S.recs[U.check],it=checkItems(r),bud=isBud(r);const dn=x=>itemDone(r,x);const done=it.filter(dn).length,open=it.filter(x=>!dn(x)).reduce((a,x)=>a+x.amount,0);
  const row=x=>`<button class="cell ckrow ${dn(x)?'done':''}" data-act="ck" data-v="${esc(x.key)}"><span class="cbox">${dn(x)?'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>':''}</span><div class="l">${esc(x.name)}${x.est?'<span class="tag est">geschätzt</span>':''}${x.tag?`<small>${x.tag}</small>`:''}</div><div class="r"><b>${fm(x.amount)}</b></div></button>`;
@@ -464,7 +469,7 @@ function budget(){const AB=allBuds();if(!AB.length)return`<h1>Verteilung</h1><di
  <div class="card"><div class="hero"><div class="lbl">Netto Gesamt</div><div class="big">${fm(B)}</div><div class="sub">${refs.length?`aus ${refs.length} Einnahme${refs.length>1?'n':''}`:''}${D?` · + ${fm(D)} übrige MwSt.`:''}</div></div>
  ${segs.length?`<div class="donutwrap" style="margin-top:14px">${donut(segs)}<div><div class="lbl" style="color:var(--sec);font-size:13px;font-weight:600">ÜBRIG</div><div style="font-size:26px;font-weight:700" class="num ${ub<0?'down':'up'}">${fm(ub)}</div><div class="sub" style="color:var(--sec);font-size:14px">${isFinite(B)&&B?pct(ub/B*100)+' vom Netto':''}</div></div></div>`:''}</div>
  ${E&&isFinite(E)?`<div class="info">Gehalt fehlend: ${fm(E)} – so viel fehlt noch bis zum Gehalt von ${fm(Cg)}.</div>`:''}
- <div class="gh"><span>Aufteilung</span><button class="link" data-act="bedit" style="font-size:13px;padding:0;text-transform:none">Bearbeiten</button></div><div class="group">${segs.map(s=>`<div class="cell"><div class="l"><i class="dotc" style="background:${s.col};margin-right:8px"></i>${esc(s.n)}</div><div class="r"><b>${fm(s.v)}</b> · ${pct(st?s.v/st*100:NaN)}</div></div>${s.k==='C'?(salaryParts(r)||[]).map(p=>`<div class="cell part"><div class="l">Teil ${esc(SR(p.src).name)}${p.est?'<span class="tag est">geschätzt</span>':''}</div><div class="r"><b>${fm(p.amount)}</b></div></div>`).join(''):''}`).join('')||'<div class="cell"><div class="l" style="color:var(--sec)">Nichts verteilt.</div></div>'}${ub<0?`<div class="cell"><div class="l down">Übrig (negativ)</div><div class="r down">${fm(ub)}</div></div>`:''}</div>
+ <div class="gh"><span>Aufteilung</span><button class="link" data-act="bedit" style="font-size:13px;padding:0;text-transform:none">Bearbeiten</button></div><div class="group">${segs.map(s=>`<div class="cell${segDone(r,s.k)?' done':''}"><div class="l"><i class="dotc" style="background:${s.col};margin-right:8px"></i>${esc(s.n)}</div><div class="r"><b>${fm(s.v)}</b> · ${pct(st?s.v/st*100:NaN)}</div></div>${s.k==='C'?(salaryParts(r)||[]).map(p=>`<div class="cell part${itemDone(r,{key:'c:C:'+p.src})?' done':''}"><div class="l">Teil ${esc(SR(p.src).name)}${p.est?'<span class="tag est">geschätzt</span>':''}</div><div class="r"><b>${fm(p.amount)}</b></div></div>`).join(''):''}`).join('')||'<div class="cell"><div class="l" style="color:var(--sec)">Nichts verteilt.</div></div>'}${ub<0?`<div class="cell"><div class="l down">Übrig (negativ)</div><div class="r down">${fm(ub)}</div></div>`:''}</div>
  ${(()=>{const it=checkItems(r),d=it.filter(x=>itemDone(r,x)).length;return`<div class="group ic" style="margin-top:10px"><button class="cell" data-act="checkopen" data-id="${r.id}"><span class="av ck ${it.length&&d===it.length?'all':''}">✓</span><div class="l">Verteilung abhaken<small>${d} von ${it.length} erledigt</small></div><span class="chev">›</span></button></div>`})()}${note?textBlock(r,note,rl(r,note,'Bemerkung')):''}${notesBlock(r)}
  ${refs.length?`<div class="gh">Netto kommt aus</div><div class="group ic">${refs.map(x=>`<button class="cell" data-act="open" data-id="${x.id}"><span class="av ${SR(srcOf(x)).cls}">${SR(srcOf(x)).l}</span><div class="l">${esc(title(x))}${x.plan?'<span class="badge">Plan</span>':''}<small>${dtext(x)}</small></div><div class="r"><b>${fm(sm(x).net)}</b></div><span class="chev">›</span></button>`).join('')}</div>`:''}
  <div class="gh">${anyPlan?'Plan vs. Ist':'Summe'} ${y}</div><div class="group"><div class="pvi h"><span>Topf</span><span>Ist</span><span>${anyPlan?'Plan':''}</span></div>
