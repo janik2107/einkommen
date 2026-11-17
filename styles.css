@@ -137,3 +137,5 @@ body.nohints .hint{display:none}
 .ckrow.done .r b{text-decoration:line-through}
 .cell.done .l,.cell.done .r{color:var(--sec);text-decoration:line-through}
 .cell.done .r b{font-weight:500}
+.av.exf{background:#ff9500}
+.badge.exb{background:#ff9500;color:#fff}
