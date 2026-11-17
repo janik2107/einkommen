@@ -1,5 +1,5 @@
 'use strict';
-const VERSION='ek-v17',KEY='einkommen-v1';
+const VERSION='ek-v18',KEY='einkommen-v1';
 const $=s=>document.querySelector(s),view=$('#view');
 const EUR=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
 const fm=x=>isFinite(x)?EUR.format(Math.abs(x)<.005?0:x):'—';
@@ -36,14 +36,43 @@ function migrate(st,persist,force){const from=st.v||1;if(from>=10&&!force)return
   const main=(ry.find(r=>r.sub&&pre.has(r.sub))||{}).sub;if(!main)continue;
   for(const r of rs)if(!r.sub){r.sub=main;if(r.label&&!String(r.label).toUpperCase().startsWith(main.toUpperCase()+' '))r.label=main+' '+r.label}}
  st.settings=st.settings||{};st.settings.rhythm=st.settings.rhythm||{};st.v=10;Calc.setDB(S===st?st:S);if(persist)try{localStorage.setItem(KEY,JSON.stringify(st))}catch(e){}}
-function buildSrc(){const g={};for(const r of Object.values(S.recs)){const t=S.tables[r.t];if(!t||t.kind!=='inc'||!t.source)continue;g[t.source]=(g[t.source]||0)+(Calc.numv(r.v&&r.v.B)||0)}
+function buildSrc(){const g={};for(const r of Object.values(S.recs)){const t=S.tables[r.t];if(!t||t.kind!=='inc'||!t.source||r.ex)continue;g[t.source]=(g[t.source]||0)+(Calc.numv(r.v&&r.v.B)||0)}
  SRCS=Object.keys(g).sort((a,b)=>g[b]-g[a]);SRC={};SRCS.forEach((k,i)=>SRC[k]={name:k.length>5&&k===k.toUpperCase()?k[0]+k.slice(1).toLowerCase():k,cls:'s'+(i%4),col:`var(--s${i%4})`,l:k[0].toUpperCase()})}
 const SR=k=>SRC[k]||NOSRC;
+// Neues Jahr anlegen (nur hinzufügen): Ist das aktuelle Jahr das neueste und gibt es dort Dezember, wird das Folgejahr
+// als Plan aus den Dezember-Einträgen gebaut: Einnahme-Betrag 0, alle Ausgaben/Abzüge gleich, Verteilung gleich (Gehalt etc.).
+// Läuft pro Jahr nur einmal (settings.genYears); bestehende Einträge werden nie verändert.
+function genNextYear(persist){try{const recs=Object.values(S.recs).filter(r=>!r.ex&&(isInc(r)||isBud(r)));if(!recs.length)return 0;
+ const Y=Math.max(...recs.map(yr).filter(Boolean)),N=Y+1;if(Y!==new Date().getFullYear())return 0;
+ S.settings.genYears=S.settings.genYears||[];if(S.settings.genYears.includes(N))return 0;
+ const tm=recs.filter(r=>yr(r)===Y&&mo(r)===11);if(!tm.some(isInc))return 0;
+ const tkey={};const nk=k=>{if(tkey[k])return tkey[k];const yy=String(Y).slice(2),ny=String(N).slice(2);let n=k.endsWith(yy)?k.slice(0,-2)+ny:k+'-'+N;
+  if(!S.tables[n]){const t=JSON.parse(JSON.stringify(S.tables[k]||{}));t.year=N;if(t.name)t.name=t.name+' · '+N;S.tables[n]=t}return tkey[k]=n};
+ const cnt={};const nid=k=>{cnt[k]=cnt[k]||0;let id;do{id=k+'-'+(++cnt[k])}while(S.recs[id]);return id};
+ const tpl=tm.slice().sort(byDate),inc=tpl.filter(isInc),bud=tpl.filter(isBud);const clone={};
+ const MM=m=>String(m+1).padStart(2,'0');
+ for(let m=0;m<12;m++)for(const t of [...inc,...bud]){const k=nk(t.t);(clone[t.id]=clone[t.id]||[])[m]=nid(k)}
+ const prevRef=(t,m,id)=>{const o=S.recs[id];if(!o||id===t.id)return null;if(clone[id])return clone[id][m];
+  if(isInc(o)&&srcOf(o)===srcOf(t)&&(o.sub||'')===(t.sub||'')&&String(o.date)<String(t.date))return m?clone[t.id][m-1]:t.id;return null};
+ const R=S.settings.rhythm||{};
+ for(let m=0;m<12;m++)for(const t of [...inc,...bud]){const r=JSON.parse(JSON.stringify(t));const id=clone[t.id][m];
+  for(const x of ['done','gotB','expB','enteredNet','chk','ov','ovOld','tpl','user'])delete r[x];
+  r.id=id;r.t=nk(t.t);r.plan=true;r.gen=N;r.date=isBud(t)?N+'-'+MM(m):N+'-'+MM(m)+'-01';
+  r.notes=isBud(t)?[]:['Tag unbekannt'];
+  r.label=isBud(t)?MON[m]+' / '+MM(m):String(t.label||'').replace(new RegExp('(\\d{1,2})\\.'+Y),MM(m)+'.'+N);
+  for(const c in r.f){r.f[c]=String(r.f[c]).replace(/\[([^\]$:][^\]:]*):([A-Z]{1,2})\]/g,(a,rid,col)=>{const n=prevRef(t,m,rid);return n?'['+n+':'+col+']':a}).replace(new RegExp('\\[\\$rate:([A-Z]+):'+Y+'\\]','g'),'[$rate:$1:'+N+']')}
+  if(isInc(t)&&!t.empty){const f=r.f.B,lit=/^\s*-?[\d.]+\s*$/,one=f&&/^\s*\[([A-Z]{1,2})\]\s*\*\s*[\d.()$a-z\[\]]+\s*$/.exec(f);
+   if(!f||lit.test(f)){delete r.f.B;r.v.B=0}else if(one){const c=one[1];if(!r.f[c]||!/\[/.test(r.f[c])){delete r.f[c];r.v[c]=0}}}
+  if(r.extra){const rr=R[dkey(srcOf(t),t.sub)]||{};r.extra=r.extra.filter(x=>{const ru=x.rule&&rr[x.rule];return ru&&(ru.r==='m'||(ru.r==='q'&&qDue(ru.s,N+'-'+MM(m))))});if(!r.extra.length){delete r.extra;delete r.xcol}}
+  S.recs[id]=r}
+ S.settings.genYears.push(N);for(const s of SRCS){const k=s+':'+N;if(S.settings.rates[k]==null&&S.settings.rates[s+':'+Y]!=null)S.settings.rates[k]=S.settings.rates[s+':'+Y]}
+ if(persist)save();return 12}catch(e){console.error(e);return 0}}
+
 const U={tab:'home',year:null,filter:'all',detail:null,form:null,bm:null,bedit:false,defs:null,result:null};
 
 /* ---------- Daten-Helfer ---------- */
 const T=r=>S.tables[r.t]||{};
-const isInc=r=>T(r).kind==='inc',isBud=r=>T(r).kind==='bud';
+const isInc=r=>T(r).kind==='inc'&&!r.ex,isEx=r=>!!r.ex&&T(r).kind==='inc',isBud=r=>T(r).kind==='bud';
 const srcOf=r=>T(r).source;
 const netCol=r=>r.net||T(r).net;
 const sm=r=>{if(!SUM.has(r.id))SUM.set(r.id,Calc.incomeSummary(r));return SUM.get(r.id)};
@@ -86,7 +115,7 @@ function deriveRates(){const R=S.settings.rates;for(const r of incs()){if(r.plan
 function rateFor(src,y){const R=S.settings.rates;if(R[src+':'+y]!=null)return R[src+':'+y];const ks=Object.keys(R).filter(k=>k.startsWith(src+':')).sort();return ks.length?R[ks[ks.length-1]]:30}
 
 /* ---------- Rendering ---------- */
-function setTab(t){U.tab=t;if(t==='home')U.year=new Date().getFullYear();U.detail=null;U.check=null;U.wfEdit=null;U.tedit=null;U.sheet=null;U.archive=false;U.amonth=null;U.barch=false;U.netEdit=null;if(t!=='new'||(U.form&&U.form.mode==='edit'))U.form=null;U.bedit=false;U.defs=null;render();scrollTo(0,0)}
+function setTab(t){U.tab=t;if(t==='home')U.year=new Date().getFullYear();U.detail=null;U.check=null;U.wfEdit=null;U.tedit=null;U.sheet=null;U.archive=false;U.exlist=false;U.amonth=null;U.barch=false;U.netEdit=null;if(t!=='new'||(U.form&&U.form.mode==='edit'))U.form=null;U.bedit=false;U.defs=null;render();scrollTo(0,0)}
 function yearSegs(){const y0=years();if(!y0.length)return'';const ys=[...new Set([...y0,new Date().getFullYear()])].sort((a,b)=>b-a);return`<div class="segs">${ys.map(y=>`<button class="seg ${y===U.year?'on':''}" data-act="year" data-v="${y}">${y}</button>`).join('')}</div>`}
 function render(){document.querySelectorAll('.tabbar button').forEach(b=>b.classList.toggle('on',b.dataset.tab===U.tab));
  if(U.year==null)U.year=new Date().getFullYear();U.ym=curYM();
@@ -137,14 +166,21 @@ function monthSection(k,list,withBtn){const n=sumN(list,false),pn=sumN(list,true
 function chipsHtml(){return`<div class="chips">${[['all','Alle'],...SRCS.map(k=>[k,SR(k).name])].map(([k,l])=>`<button class="chip ${U.filter===k?'on':''}" data-act="filter" data-v="${k}">${l}</button>`).join('')}</div>`}
 function archRow(kind,months,total){return`<div class="group ic"><button class="cell" data-act="${kind}"><span class="av arc"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></svg></span><div class="l">Archiv<small>${months} Monat${months===1?'':'e'}${total!=null?' · netto '+fm(total):''}</small></div><span class="chev">›</span></button></div>`}
 function list(){if(!years().length)return`<h1>Einnahmen</h1>${emptyHint()}`;
- if(U.amonth)return archMonth();if(U.archive)return archiveView();
+ if(U.exlist)return exView();if(U.amonth)return archMonth();if(U.archive)return archiveView();
  const rs=incs().filter(filt);const g={};rs.forEach(r=>(g[ymOf(r)]=g[ymOf(r)]||[]).push(r));
  const live=Object.keys(g).filter(k=>!isArch(k)).sort(),arch=Object.keys(g).filter(isArch);
  const cur=curYM();const hasCur=live.includes(cur)||isArch(cur);
- return`<div class="top"><h1>Einnahmen</h1><button class="plus" data-act="tab" data-v="new" aria-label="Neue Einnahme">+</button></div>${chipsHtml()}${archRow('archopen',arch.length,arch.reduce((x,k)=>x+sumN(g[k],false),0))}
+ return`<div class="top"><h1>Einnahmen</h1><button class="plus" data-act="tab" data-v="new" aria-label="Neue Einnahme">+</button></div>${chipsHtml()}${archRow('archopen',arch.length,arch.reduce((x,k)=>x+sumN(g[k],false),0))}${exRow()}
  ${hasCur?'':`<section class="month"><div class="mh"><span>${ymText(cur)}</span><span>netto <b>${fm(0)}</b></span></div><div class="card empty" style="padding:18px">Diesen Monat noch keine Einnahmen.<br><button class="link" data-act="tab" data-v="new">Einnahme erfassen</button></div></section>`}
  ${live.map(k=>monthSection(k,g[k],true)).join('')}
  <div class="foot hint">Ältere Monate wandern am Monatsanfang automatisch ins Archiv. Sie zählen weiter in der Übersicht.</div>`}
+const exs=()=>all().filter(isEx).sort((a,b)=>String(b.created||b.id).localeCompare(String(a.created||a.id)));
+function exRow(){const n=exs().length;return`<div class="group ic"><button class="cell" data-act="exopen"><span class="av exf"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><div class="l">Beispiele<small>${n?n+' Beispielrechnung'+(n===1?'':'en'):'Probe-Rechnungen, zählen nirgends mit'}</small></div><span class="chev">›</span></button></div>`}
+function exItem(r){const s=sm(r);return`<div class="swipe"><button class="swdel" data-act="del" data-id="${r.id}">Löschen</button><button class="cell" data-act="open" data-id="${r.id}"><span class="av ${SR(srcOf(r)).cls}">${SR(srcOf(r)).l}</span><div class="l"><div class="one">${esc(r.exName||title(r))}</div><small>${esc(r.exName?title(r)+' · ':'')}brutto ${fm(s.gross)}</small></div><div class="r"><b>${fm(s.net)}</b></div><span class="chev">›</span></button></div>`}
+function exView(){const L=exs();return`<div class="navbar"><button data-act="exclose">‹ Einnahmen</button><button data-act="exnew" style="font-weight:600">+ Neu</button></div><h1 style="margin-top:2px">Beispiele</h1>
+ <div class="foot hint" style="margin:0 16px 10px">Hier rechnest du durch, was netto rauskommt. Beispiele zählen nicht in Übersicht, Einnahmen oder Verteilung.</div>
+ ${L.length?`<div class="group ic">${L.map(exItem).join('')}</div>`:'<div class="card empty">Noch keine Beispielrechnung.</div>'}
+ <div style="margin-top:16px"><button class="primary" data-act="exnew">Neue Beispielrechnung</button></div>`}
 function yearBlocks(keys,rowFn,sumFn){const ys=[...new Set(keys.map(k=>k.slice(0,4)))].sort().reverse();U.yopen=U.yopen||new Set([ys[0]]);
  return ys.map(y=>{const ks=keys.filter(k=>k.startsWith(y)).sort().reverse();const open=U.yopen.has(y);const t=sumFn(ks);
   return`<button class="yh" data-act="ytog" data-v="${y}"><span>${y}</span><span class="num">${t}<i class="tw ${open?'o':''}">›</i></span></button>${open?`<div class="group ic">${ks.map(rowFn).join('')}</div>`:''}`}).join('')}
@@ -182,7 +218,7 @@ function steps(r,s){let run=0,html='';const st=s.steps;const ed=U.wfEdit===r.id;
   html+=`<div class="cell ${cls}${isDone?' done':''}"><div class="l">${base?'':(neg?'− ':'+ ')}${lab}${lk?rhTag(r,lk):''}${Calc.isTax(x.tlabel)?'<span class="tag">Steuer</span>':''}${Calc.isMwst(x.tlabel)?`<span class="tag">${pct(s.gross?(-x.amount)/(s.gross+x.amount)*100:NaN)} auf netto</span>`:''}${estHint(r,x)}</div><div class="r">${fm(Math.abs(x.amount))}</div></div>`;
   if(Calc.isMwst(x.tlabel)){const nx=st[i+1];html+=nachMwstRow(r,s,run+(nx&&nx.manual?nx.amount:0))}});
  return html+`<div class="cell tot"><div class="l">= Netto</div><div class="r">${fm(s.net)}</div></div>`}
-function detail(){const r=S.recs[U.detail];if(!r){U.detail=null;return list()}const tb=T(r);if(isInc(r))return detailInc(r,tb);
+function detail(){const r=S.recs[U.detail];if(!r){U.detail=null;return list()}const tb=T(r);if(isInc(r)||isEx(r))return detailInc(r,tb);
  if(isBud(r)){U.detail=null;return budget()}
  const s=sm(r);const texts=tb.cols.filter(([c])=>c!=='A'&&typeof r.v[c]==='string'&&r.v[c].trim()&&!r.f[c]);
  const shown=new Set(s.steps.map(x=>x.key));
@@ -211,9 +247,9 @@ function detailInc(r,tb){const s=sm(r);const ed=U.wfEdit===r.id;
  const shown=new Set(s.steps.map(x=>x.key));const tc=textCols(r);const tcs=new Set(tc.map(x=>x[0]));
  const other=tb.cols.filter(([c])=>c!=='A'&&!tcs.has(c)&&!shown.has(r.id+':'+c)&&!(typeof r.v[c]==='string'&&!r.f[c])&&(r.f[c]||isFinite(Calc.val(r,c))));
  const it=checkItems(r),isDone=x=>!!(r.done&&r.done[x.key]),done=it.filter(isDone).length;
- return`<div class="navbar"><button data-act="back">‹ ${U.amonth?'Archiv':U.tab==='budget'?'Verteilung':'Einnahmen'}</button><button data-act="edit" data-id="${r.id}">Bearbeiten</button></div>
- <div class="dhead"><span class="av ${SR(srcOf(r)).cls}" style="margin:0 auto;width:44px;height:44px;flex:none;border-radius:12px;font-size:20px">${SR(srcOf(r)).l}</span><h2>${esc(title(r))}${r.plan?'<span class="badge">Plan</span>':''}</h2><div class="t">${dtext(r)}</div><div class="big">${fm(s.net)}</div><div class="t">netto von ${fm(s.gross)} brutto${s.manual?' · Nach MwSt. manuell':''}</div></div>
- ${r.plan?`<div class="card" style="text-align:center"><div style="color:var(--sec);font-size:15px;margin-bottom:10px">Diese Einnahme ist noch geplant.</div><button class="primary" data-act="transfer" data-id="${r.id}">Überweisung ist eingegangen</button></div>`:
+ return`<div class="navbar"><button data-act="back">‹ ${r.ex?'Beispiele':U.amonth?'Archiv':U.tab==='budget'?'Verteilung':'Einnahmen'}</button><button data-act="edit" data-id="${r.id}">Bearbeiten</button></div>
+ <div class="dhead"><span class="av ${SR(srcOf(r)).cls}" style="margin:0 auto;width:44px;height:44px;flex:none;border-radius:12px;font-size:20px">${SR(srcOf(r)).l}</span><h2>${esc(title(r))}${r.plan?'<span class="badge">Plan</span>':''}${r.ex?'<span class="badge exb">Beispiel</span>':''}</h2><div class="t">${r.ex?'Beispielrechnung':dtext(r)}</div><div class="big">${fm(s.net)}</div><div class="t">netto von ${fm(s.gross)} brutto${s.manual?' · Nach MwSt. manuell':''}</div></div>
+ ${r.ex?`<div class="card" style="text-align:center;color:var(--sec);font-size:15px">Nur zum Durchrechnen. Zählt nicht in Übersicht, Einnahmen oder Verteilung.<br>Tippe auf „Nach MwSt.“, um den Betrag zu ändern.</div>`:r.plan?`<div class="card" style="text-align:center"><div style="color:var(--sec);font-size:15px;margin-bottom:10px">Diese Einnahme ist noch geplant.</div><button class="primary" data-act="transfer" data-id="${r.id}">Überweisung ist eingegangen</button></div>`:
  `${r.gotB!=null?`<div class="card gotbox"><div class="gotl">Eingegangen <b>${fm(r.gotB)}</b>${r.expB!=null&&Math.abs(r.gotB-r.expB)>0.004?` <span class="badge man">statt ${fm(r.expB)}</span>`:''}${r.enteredNet!=null?`<small> · aus ${fm(r.enteredNet)} nach MwSt. + ${pct(vatOf(r))} MwSt.</small>`:''}</div><button class="link" data-act="gotedit" data-id="${r.id}">Betrag ändern</button></div>`:''}
  <div class="group ic"><button class="cell" data-act="checkopen" data-id="${r.id}"><span class="av ck ${it.length&&done===it.length?'all':''}">✓</span><div class="l">Ausgaben überweisen<small>${done} von ${it.length} erledigt${it.length-done?' · offen '+fm(it.filter(x=>!isDone(x)).reduce((a,x)=>a+x.amount,0)):''}</small></div><span class="chev">›</span></button></div>`}
  <div class="gh"><span>Rechenweg wie in der Tabelle</span><button class="link" data-act="wfedit" data-id="${r.id}" style="font-size:13px;padding:0;text-transform:none">${ed?'Fertig':'Posten bearbeiten'}</button></div>${!ed&&Calc.nachMwstCol(r)&&!s.manual?'<div class="foot hint" style="margin:-2px 16px 8px">Tippe auf „Nach MwSt.“: ändert die Überweisungssumme brutto automatisch (Betrag × (1 + MwSt.-Satz)).</div>':''}
@@ -223,7 +259,7 @@ function detailInc(r,tb){const s=sm(r);const ed=U.wfEdit===r.id;
  ${tc.map(([c,l])=>textBlock(r,c,rl(r,c,l))).join('')}
  ${notesBlock(r)}
  ${other.length?`<details class="group" style="margin-top:14px"><summary>Weitere Spalten aus der Tabelle (${other.length})</summary>${other.map(([c,l])=>`<div class="cell"><div class="l">${esc(l)}${r.f[c]?`<small>${esc(r.f[c]==='#REF!'?'Formel kaputt (#REF!)':prettyF(r,r.f[c]))}</small>`:''}</div><div class="r">${fm(Calc.val(r,c))}</div></div>`).join('')}</details>`:''}
- <div class="group" style="margin-top:22px"><button class="cell btn danger" data-act="del" data-id="${r.id}">Einnahme löschen</button></div>
+ <div class="group" style="margin-top:22px"><button class="cell btn danger" data-act="del" data-id="${r.id}">${r.ex?'Beispiel löschen':'Einnahme löschen'}</button></div>
  <div class="foot hint">Quelle: ${esc(tb.name)}</div>`}
 /* ---------- Abhaken ---------- */
 // Feste Netto-Beträge je Quelle. restSrc bekommt den Rest des Gehalts (C).
@@ -381,15 +417,16 @@ function rhApply(r,src,sub,date){const tb=T(r),R=(S.settings.rhythm||{})[dkey(sr
  for(const[k,ru]of Object.entries(R))if(k.startsWith('x:')&&(ru.r==='m'||(ru.r==='q'&&qDue(ru.s,ym)))){r.extra=r.extra||[];r.xcol=netCol(r);r.extra.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),name:ru.n||'Posten',amount:ru.a||0,rule:k})}}
 function withDraft(fn){const d=U.form.rec;Calc.setDB({tables:S.tables,recs:{...S.recs,[d.id]:d},settings:S.settings});try{return fn(d)}finally{Calc.setDB(S)}}
 function initForm(){const src=U.form?.src||SRCS[0],subs=subsOf(src);const sub=U.form&&subs.includes(U.form.sub)?U.form.sub:subs[0];const date=U.form?.rec?.date||today();
- const old=U.form;const rec=makeDraft(src,sub,date);U.form={mode:'new',src,sub,rec,orig:rec&&JSON.parse(JSON.stringify(rec.f)),addBudget:true,replace:true};
+ const old=U.form;const rec=makeDraft(src,sub,date);U.form={mode:'new',src,sub,rec,orig:rec&&JSON.parse(JSON.stringify(rec.f)),addBudget:true,replace:true,ex:old&&old.mode==='new'?!!old.ex:!!U.exPreset};U.exPreset=false;
  if(old&&old.mode==='new'&&rec){if(old.rec&&old.rec.v.B)rec.v.B=old.rec.v.B;rec.plan=old.rec?.plan||false}}
 function planMatch(F){const d=F.rec;const c=incs().filter(r=>r.plan&&r.id!==d.id&&srcOf(r)===F.src&&String(r.date).slice(0,7)===d.date.slice(0,7));return c.find(r=>(r.sub||'')===(F.sub||''))||(F.sub===subsOf(F.src)[0]?c.find(r=>!r.sub):null)}
 function budFor(date){return all().find(r=>isBud(r)&&String(r.date).slice(0,7)===date.slice(0,7))}
 function form(){if(!years().length)return`<h1>Neue Einnahme</h1>${emptyHint()}`;
  if(!U.form||(U.form.mode==='new'&&!U.form.rec))initForm();const F=U.form,d=F.rec;if(!d)return`<h1>Neue Einnahme</h1><div class="card empty">Für diese Quelle gibt es noch keine Vorlage.</div>`;
  const edit=F.mode==='edit',tpl=S.recs[d.tpl];
- const pm=edit?null:planMatch(F),bud=edit?null:budFor(d.date);
- return`${edit?`<div class="navbar"><button data-act="cancel">Abbrechen</button><b>Bearbeiten</b><button data-act="save" style="font-weight:600">Sichern</button></div>`:'<h1>Neue Einnahme</h1>'}
+ const pm=edit||F.ex?null:planMatch(F),bud=edit||F.ex?null:budFor(d.date);
+ return`${edit?`<div class="navbar"><button data-act="cancel">Abbrechen</button><b>Bearbeiten</b><button data-act="save" style="font-weight:600">Sichern</button></div>`:`<h1>${F.ex?'Beispielrechnung':'Neue Einnahme'}</h1>`}
+ ${edit?'':`<div class="group"><label class="cell"><div class="l">Nur Beispielrechnung<small>Kommt in den Ordner „Beispiele“, zählt nirgends mit</small></div><input type="checkbox" id="fex" ${F.ex?'checked':''} style="flex:0;width:22px;height:22px;accent-color:var(--accent)"></label>${F.ex?`<label class="cell"><span>Name</span><input id="fexname" placeholder="z. B. 8.000 € CMS" value="${esc(F.exName||'')}"></label>`:''}</div>`}
  ${edit?`<div class="info">${esc(title(d))} · ${esc(d.label||'')}</div>`:`<div class="segs">${SRCS.map(k=>`<button class="seg ${F.src===k?'on':''}" data-act="fsrc" data-v="${k}">${SR(k).name}</button>`).join('')}</div>
  <div class="chips">${subsOf(F.src).map(s=>`<button class="chip ${F.sub===s?'on':''}" data-act="fsub" data-v="${esc(s)}">${esc(s||SR(F.src).name)}</button>`).join('')}</div>`}
  <div class="group"><label class="cell"><span>Datum</span><input type="date" id="fdate" value="${esc(String(d.date).length===10?d.date:d.date+'-01')}"></label>
@@ -399,13 +436,13 @@ function form(){if(!years().length)return`<h1>Neue Einnahme</h1>${emptyHint()}`;
  <div class="cell bruttohero"><div class="l">Überweisung brutto<small>${d.enteredNet>0?'nach MwSt. + MwSt. · wird gespeichert':d.v.B>0?'bisher gespeichert (ohne Angabe nach MwSt.)':'—'}</small></div><div class="r"><b id="fbruttov" class="bigb">${fm(d.v.B||0)}</b></div></div>
  ${d.enteredNet==null&&d.v.B>0?`<div class="cell"><div class="l" style="color:var(--sec);font-size:13px">Bisher nur Brutto gespeichert. Betrag nach MwSt. eingeben → Brutto = Betrag × (1 + Satz). Geht auch in der Detailansicht über die Zeile „Nach MwSt.“.</div></div>`:''}
  ${d.gotB!=null?`<div class="cell"><div class="l" style="color:var(--sec);font-size:13px">Eingegangen bisher: <b style="color:var(--text)">${fm(d.gotB)}</b>${d.enteredNet>0&&Math.abs(d.gotB-(d.v.B||0))>0.004?' · weicht vom neuen Brutto ab':''}. Beim Speichern wirst du gefragt.</div></div>`:''}
- <label class="cell"><span>Noch nicht erhalten (Plan)</span><input type="checkbox" id="fplan" ${d.plan?'checked':''} style="flex:0;width:22px;height:22px;accent-color:var(--accent)"></label></div>
+ ${F.ex?'':`<label class="cell"><span>Noch nicht erhalten (Plan)</span><input type="checkbox" id="fplan" ${d.plan?'checked':''} style="flex:0;width:22px;height:22px;accent-color:var(--accent)"></label>`}</div>
  <div class="gh"><span>Rechenweg</span><span id="fnet"></span></div><div class="group wf" id="fsteps"></div>
  ${(()=>{const ex=extraCols(d);return ex.length?`<div class="gh">Für die Steuer (nicht vom Netto abgezogen)</div><div class="group">${ex.map(([c,l])=>`<label class="cell"><span>${esc(l)}</span><input data-col="${c}" inputmode="decimal" value="${inpE(d.v[c])}"></label>`).join('')}</div>`:''})()}
  <div class="foot hint">${edit?'Felder ändern, „Sichern“ tippen. Leere Steuer-/MwSt.-Felder werden automatisch berechnet.':`Werte vorausgefüllt aus „${esc(tpl?tpl.label:'')}“ und deinen Standard-Abzügen. ESt-Satz ${pct(rateFor(F.src,+d.date.slice(0,4)))}, MwSt. ${pct(S.settings.mwst)} (Einstellungen). Jeder Wert ist änderbar.`}</div>
  ${edit?'':`<div class="group" style="margin-top:16px">${pm?`<label class="cell"><div class="l">Plan-Eintrag ersetzen<small>„${esc(pm.label)}“ wird durch diesen Eintrag ersetzt</small></div><input type="checkbox" id="frepl" ${F.replace?'checked':''} style="flex:0;width:22px;height:22px;accent-color:var(--accent)"></label>`:''}
  ${bud&&!(pm&&F.replace)?`<label class="cell"><div class="l">In Verteilung ${MON[mo(bud)]} ${yr(bud)} zählen<small>Netto wird zu „Netto Gesamt“ addiert</small></div><input type="checkbox" id="fbud" ${F.addBudget?'checked':''} style="flex:0;width:22px;height:22px;accent-color:var(--accent)"></label>`:''}</div>
- <div style="margin-top:16px"><button class="primary" data-act="save">Einnahme sichern</button></div>`}`}
+ <div style="margin-top:16px"><button class="primary" data-act="save">${F.ex?'Beispiel sichern':'Einnahme sichern'}</button></div>`}`}
 function extraCols(d){return withDraft(()=>{const st=new Set(Calc.waterfall(d,netCol(d)).map(x=>x.col));const fs=Object.values(d.f).join(' ');return T(d).cols.filter(([c])=>c!=='A'&&c!=='B'&&!st.has(c)&&!d.f[c]&&typeof d.v[c]==='number'&&fs.includes('['+c+']'))})}
 function refreshForm(){const F=U.form,box=$('#fsteps');if(!F||!F.rec||!box)return;const d=F.rec;
  withDraft(()=>{Calc.clear();const s=Calc.incomeSummary(d);const keep=document.activeElement&&document.activeElement.dataset.col;
@@ -422,9 +459,11 @@ function onFormInput(e){const F=U.form;if(!F||!F.rec)return;const d=F.rec,t=e.ta
   if(t.value.trim()===''){if(orig){d.f[c]=orig}else d.v[c]=0}else{if(orig)delete d.f[c];d.v[c]=isFinite(v)?v:0}refreshForm()}}
 function onFormChange(e){const F=U.form;if(!F||!F.rec)return;const d=F.rec,t=e.target;
  if(t.id==='fdate'&&t.value){setFormDate(F,t.value);render()}
- if(t.id==='fplan')d.plan=t.checked;if(t.id==='frepl'){F.replace=t.checked;render()}if(t.id==='fbud')F.addBudget=t.checked}
+ if(t.id==='fplan')d.plan=t.checked;if(t.id==='fex'){F.ex=t.checked;if(F.ex)d.plan=false;render()}if(t.id==='fexname')F.exName=t.value;if(t.id==='frepl'){F.replace=t.checked;render()}if(t.id==='fbud')F.addBudget=t.checked}
 function freeze(f){return f.replace(/\[\$mwst\]/g,'('+S.settings.mwst/100+')').replace(/\[\$rate:([A-Z]+):(\d+)\]/g,(m,s,y)=>'('+rateFor(s,+y)/100+')')}
 function saveForm(confirmed){const F=U.form,d=F.rec;if(d.enteredNet>0)syncNetToGross(d);if(!(d.v.B>0)&&!d.f.B&&!(F.mode==='edit')){toast('Bitte Betrag nach MwSt. eingeben');return}
+ if(F.mode==='new'&&F.ex){for(const c in d.f)d.f[c]=freeze(d.f[c]);const nm=($('#fexname')&&$('#fexname').value.trim())||F.exName||'';d.ex=true;d.plan=false;d.created=new Date().toISOString();if(nm)d.exName=nm;d.label='Beispiel '+(nm||title(d));d.notes=[];
+  S.recs[d.id]=d;save();U.form=null;U.tab='list';U.exlist=true;U.detail=d.id;toast('Beispiel gesichert');render();scrollTo(0,0);return d.id}
  const dateChanged=F.mode==='new'||(S.recs[d.id]&&S.recs[d.id].date!==d.date);
  if(!confirmed&&!d.plan&&dateChanged){const sum=Calc.val(d,'B');U.sheet={mode:'form',date:String(d.date).length===10?d.date:d.date+'-01',sum,exp:d.expB!=null?d.expB:sum,editSum:true};renderSheet();return}
  for(const c in d.f)d.f[c]=freeze(d.f[c]);
@@ -522,7 +561,7 @@ function importObj(o){if(!o||o.app!=='einkommen'||!Array.isArray(o.records))thro
   S.tables=o.tables||{};S.recs={};o.records.forEach(r=>S.recs[r.id]=r);S.settings=Object.assign(defaults().settings,o.settings||{});S.setups=o.setups||S.setups;S.archive=o.archive||{};S.v=o.v||1;migrate(S,false,true);save();return{add:o.records.length,skip:0,notes:0}}
  let add=0,skip=0,notes=0;for(const[k,t]of Object.entries(o.tables||{}))if(!S.tables[k])S.tables[k]=t;
  for(const r of o.records){if(S.recs[r.id]){skip++;continue}S.recs[r.id]=r;add++;if((r.notes||[]).length)notes++}
- Calc.setDB(S);SUM=new Map();migrate(S,false,true);deriveRates();save();return{add,skip,notes}}
+ Calc.setDB(S);SUM=new Map();migrate(S,false,true);deriveRates();save();genNextYear(true);return{add,skip,notes}}
 async function importSetup(code){code=code.trim().replace(/^.*#setup=/,'');const fp=(await sha(code)).slice(0,24);
  if(S.setups.includes(fp)&&all().length){U.result={already:true};return}
  const o=JSON.parse(await inflate(unb64u(code)));const res=importObj(o);if(res){S.setups.push(fp);save();U.result=res;U.year=new Date().getFullYear()}}
@@ -566,6 +605,8 @@ document.addEventListener('click',async e=>{const p=e.target.closest('[data-pin]
  case'filter':U.filter=v;if(U.tab!=='list'){U.tab='list'}render();break;
  case'open':U.detail=id;U.netEdit=null;render();scrollTo(0,0);break;
  case'back':U.detail=null;U.netEdit=null;render();break;
+ case'exopen':U.exlist=true;U.detail=null;render();scrollTo(0,0);break;case'exclose':U.exlist=false;render();break;
+ case'exnew':U.exPreset=true;U.form=null;setTab('new');break;
  case'edit':{const r=JSON.parse(JSON.stringify(S.recs[id]));U.form={mode:'edit',src:srcOf(r),sub:r.sub,rec:r,orig:JSON.parse(JSON.stringify(r.f))};U.detail=null;render();scrollTo(0,0);break}
  case'cancel':U.detail=U.form?.rec?.id;U.form=null;render();break;
  case'save':saveForm();break;
@@ -639,7 +680,7 @@ function lockPageZoom() {
 }
 lockPageZoom();
 
-(async function start(){applyTheme();if(S.pin)showLock('unlock');
+(async function start(){applyTheme();genNextYear(true);if(S.pin)showLock('unlock');
  if(/#setup=/.test(location.hash)){const code=location.hash;history.replaceState(null,'',location.pathname+location.search);try{await importSetup(code)}catch(err){U.result=null;alert('Einrichtungslink konnte nicht gelesen werden: '+err.message)}}
  render();
  if('serviceWorker'in navigator&&!/nosw/.test(location.search))navigator.serviceWorker.register('sw.js').catch(()=>{})})();
